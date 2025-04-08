@@ -1,0 +1,45 @@
+name: "credential retrieval"
+description: "Retrieve the credentials from password manager"
+
+inputs:
+  load-all:
+    description: "Loads all the credentials in 1Password vault"
+    required: false
+    type: boolean
+    default: true
+  op-token:
+    description: "1Password token of the service account"
+    required: true
+    type: string
+  op-vault:
+    description: "1Password vault to search all credentials"
+    required: true
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install 1Password CLI
+      uses: 1password/install-cli-action@v1
+      with:
+        version: latest-beta
+    - name: Download ALL vault secrets
+      if: ${{ inputs.load-all }}
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
+      shell: bash
+      run: |
+        echo "Get a list with all the credential names"
+        op item list --vault ${{ inputs.op-vault }} --categories 'API Credential' --format json > op_list.json
+        if [[ -f op_list.json ]];then
+          number_entries=$(jq length op_list.json)
+        fi
+        for((i=0; i<number_entries; i++)); do
+          # Extract values from each item using jq
+          item_name=$(jq -r ".[$i].title" op_list.json)
+          item_credential=$(op read "op://${{ inputs.op-vault }}/${item_name}/credential")
+          echo "::add-mask::$item_credential"
+          echo ${item_name}=${item_credential} >> $GITHUB_ENV
+        done
+
+        rm op_list.json
