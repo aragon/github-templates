@@ -53,7 +53,8 @@ runs:
       uses: 1password/install-cli-action@v1
       with:
         version: latest-beta
-    - name: List ALL items in the vault ""
+
+    - name: List ALL items in the vault
       env:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
@@ -61,12 +62,13 @@ runs:
         echo "Get a list with all the credential names"
         op item list --vault ${{ inputs.op-vault }} --categories 'API Credential' --format json > op_list.json
 
-    - name: Download ALL vault secrets and SET THEM AS VARS
-      if: ${{ inputs.mode }} == 'alltoenv'
+    - name: "Download ALL vault secrets and SET THEM AS VARS"
+      if: ${{ inputs.mode  == 'alltoenv' }}
       env:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
       run: |
+        # Download ALL vault secrets and SET THEM AS VARS
         # Extracts number of items
         if [[ -f op_list.json ]];then
           number_entries=$(jq length op_list.json)
@@ -81,12 +83,13 @@ runs:
 
         rm op_list.json
 
-    - name: Download ALL vault secrets and STORE THEM IN FILE ${{ inputs.secret-filepath }}
-      if: ${{ inputs.mode }} == 'alltofile'
+    - name: "Download ALL vault secrets and STORE THEM IN FILE ${{ inputs.secret-filepath }}"
+      if: ${{ inputs.mode  == 'alltofile' }}
       env:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
       run: |
+        # Download ALL vault secrets and STORE THEM IN FILE ${{ inputs.secret-filepath }}
         # Extracts number of items
         if [[ -f op_list.json ]];then
           number_entries=$(jq length op_list.json)
