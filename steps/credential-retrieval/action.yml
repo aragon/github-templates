@@ -59,7 +59,7 @@ runs:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
       run: |
-        echo "Retrieving a list of all credential names in the vault ${{ inputs.op-vault }}
+        echo "Retrieving a list of all credential names in the vault ${{ inputs.op-vault }}"
         op item list --vault ${{ inputs.op-vault }} --categories 'API Credential' --format json > op_list.json
 
     - name: "Download All Vault Secrets and Set Them as envvars"
