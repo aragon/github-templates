@@ -2,15 +2,45 @@ name: "credential retrieval"
 description: "Retrieve the credentials from password manager"
 
 inputs:
-  load-all:
-    description: "Loads all the credentials in 1Password vault"
+  mode:
+    description: |
+      Mode to use the credential retrieval library
+      alltoenv: Loads all the credentials in 1Password vault and sets it as MASKED github envs
+      alltofile:  Loads all the credentials in 1Password vault and sets in in a specific file. 
+        Options:
+          secret-filepath
+          file-format
     required: false
-    type: boolean
-    default: true
+    type: choice
+    default: "alltoenv"
+    options:
+      - alltoenv
+      - alltofile
+
+  secret-filepath:
+    description: |
+      Sets the filepath where your are going to download the secrets. 
+      It will add the secrets to the end of the file
+    required: false
+    type: string
+    default: ".env"
+
+  file-format:
+    description: |
+      Sets the way the configfile will be formatted. It will add the secrets to the end of the file
+      env: will use the format VARNAME=VARVALUE
+    required: false
+    type: choice
+    default: "env"
+    options:
+      - env
+
+  # OP values
   op-token:
     description: "1Password token of the service account"
     required: true
     type: string
+
   op-vault:
     description: "1Password vault to search all credentials"
     required: true
@@ -23,14 +53,21 @@ runs:
       uses: 1password/install-cli-action@v1
       with:
         version: latest-beta
-    - name: Download ALL vault secrets
-      if: ${{ inputs.load-all }}
+    - name: List ALL items in the vault ""
       env:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
       run: |
         echo "Get a list with all the credential names"
         op item list --vault ${{ inputs.op-vault }} --categories 'API Credential' --format json > op_list.json
+
+    - name: Download ALL vault secrets and SET THEM AS VARS
+      if: ${{ inputs.mode }} == 'alltoenv'
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
+      shell: bash
+      run: |
+        # Extracts number of items
         if [[ -f op_list.json ]];then
           number_entries=$(jq length op_list.json)
         fi
@@ -40,6 +77,32 @@ runs:
           item_credential=$(op read "op://${{ inputs.op-vault }}/${item_name}/credential")
           echo "::add-mask::$item_credential"
           echo ${item_name}=${item_credential} >> $GITHUB_ENV
+        done
+
+        rm op_list.json
+    - name: Download ALL vault secrets and STORE THEM IN FILE ${{ inputs.secret-filepath }}
+      if: ${{ inputs.mode }} == 'alltofile'
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
+      shell: bash
+      run: |
+        # Extracts number of items
+        if [[ -f op_list.json ]];then
+          number_entries=$(jq length op_list.json)
+        fi
+        for((i=0; i<number_entries; i++)); do
+          # Extract values from each item using jq
+          item_name=$(jq -r ".[$i].title" op_list.json)
+          item_credential=$(op read "op://${{ inputs.op-vault }}/${item_name}/credential")
+          case "${{ inputs.output-format }}" in
+            "env")
+              echo "${item_name}=${item_credential}" >> "${{ inputs.secret-filepath }}"
+              ;;
+            *)
+              echo "Unsupported output format: ${{ inputs.output-format }}"
+              exit 1
+              ;;
+          esac
         done
 
         rm op_list.json
