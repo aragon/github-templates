@@ -1,15 +1,15 @@
-name: "credential retrieval"
-description: "Retrieve the credentials from password manager"
+name: "Credential Retrieval"
+description: "Retrieve credentials from a password manager"
 
 inputs:
   mode:
     description: |
-      Mode to use the credential retrieval library
-      alltoenv: Loads all the credentials in 1Password vault and sets it as MASKED github envs
-      alltofile:  Loads all the credentials in 1Password vault and sets in in a specific file. 
+      Mode to use the credential retrieval library:
+      - alltoenv: Loads all credentials in the 1Password vault and sets them as MASKED GitHub environment variables.
+      - alltofile: Loads all credentials in the 1Password vault and stores them in a specified file.
         Options:
-          secret-filepath
-          file-format
+          - secret-filepath
+          - file-format
     required: false
     type: choice
     default: "alltoenv"
@@ -19,16 +19,16 @@ inputs:
 
   secret-filepath:
     description: |
-      Sets the filepath where your are going to download the secrets. 
-      It will add the secrets to the end of the file
+      Specifies the filepath where secrets will be downloaded.
+      Secrets will be appended to the end of the file.
     required: false
     type: string
     default: ".env"
 
   file-format:
     description: |
-      Sets the way the configfile will be formatted. It will add the secrets to the end of the file
-      env: will use the format VARNAME=VARVALUE
+      Specifies the format of the configuration file.
+      - env: Uses the format VARNAME=VARVALUE
     required: false
     type: choice
     default: "env"
@@ -37,12 +37,12 @@ inputs:
 
   # OP values
   op-token:
-    description: "1Password token of the service account"
+    description: "1Password token for the service account"
     required: true
     type: string
 
   op-vault:
-    description: "1Password vault to search all credentials"
+    description: "1Password vault to search for all credentials"
     required: true
     type: string
 
@@ -54,16 +54,16 @@ runs:
       with:
         version: latest-beta
 
-    - name: List ALL items in the vault
+    - name: List All Items in the Vault
       env:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
       run: |
-        echo "Get a list with all the credential names"
+        echo "Retrieving a list of all credential names in the vault ${{ inputs.op-vault }}
         op item list --vault ${{ inputs.op-vault }} --categories 'API Credential' --format json > op_list.json
 
-    - name: "Download ALL vault secrets and SET THEM AS VARS"
-      if: ${{ inputs.mode  == 'alltoenv' }}
+    - name: "Download All Vault Secrets and Set Them as envvars"
+      if: ${{ inputs.mode == 'alltoenv' }}
       env:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
@@ -78,13 +78,12 @@ runs:
           item_name=$(jq -r ".[$i].title" op_list.json)
           item_credential=$(op read "op://${{ inputs.op-vault }}/${item_name}/credential")
           echo "::add-mask::$item_credential"
-          echo ${item_name}=${item_credential} >> $GITHUB_ENV
+          echo "${item_name}=${item_credential}" >> $GITHUB_ENV
         done
-
         rm op_list.json
 
-    - name: "Download ALL vault secrets and STORE THEM IN FILE ${{ inputs.secret-filepath }}"
-      if: ${{ inputs.mode  == 'alltofile' }}
+    - name: "Download All Vault Secrets and Store Them in File ${{ inputs.secret-filepath }}"
+      if: ${{ inputs.mode == 'alltofile' }}
       env:
         OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
       shell: bash
@@ -94,8 +93,7 @@ runs:
         if [[ -f op_list.json ]];then
           number_entries=$(jq length op_list.json)
         fi
-        for((i=0; i<number_entries; i++)); do
-          # Extract values from each item using jq
+        for ((i=0; i<number_entries; i++)); do
           item_name=$(jq -r ".[$i].title" op_list.json)
           item_credential=$(op read "op://${{ inputs.op-vault }}/${item_name}/credential")
           case "${{ inputs.file-format }}" in
@@ -108,5 +106,4 @@ runs:
               ;;
           esac
         done
-
         rm op_list.json
