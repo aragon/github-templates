@@ -80,6 +80,7 @@ runs:
         done
 
         rm op_list.json
+
     - name: Download ALL vault secrets and STORE THEM IN FILE ${{ inputs.secret-filepath }}
       if: ${{ inputs.mode }} == 'alltofile'
       env:
