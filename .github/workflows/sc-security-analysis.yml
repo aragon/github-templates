@@ -6,7 +6,7 @@ on:
       ## Slither
       ### https://github.com/crytic/slither/wiki/Usage#configuration-file
       slither:
-        required: false
+        required: true
         type: boolean
         default: true
         description: "Enable slither"
@@ -18,7 +18,7 @@ on:
       # Execution inputs
       ## Workflow runner
       workflow-runner:
-        required: true
+        required: false
         type: string
         default: "ubuntu-latest"
         description: "Workflow runner"
