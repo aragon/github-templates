@@ -94,7 +94,7 @@ jobs:
           args: >
             -c "slither
             out
-            --no-compile
+            --ignore-compile
             --sarif results.sarif
             --checklist
             --json results.json
