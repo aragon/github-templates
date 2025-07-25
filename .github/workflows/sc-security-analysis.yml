@@ -104,7 +104,8 @@ jobs:
             --checklist
             --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/
             --json -
-
+      - name: List files
+        run: ls -l
       - name: Upload build artifacts
         id: upload
         uses: actions/upload-artifact@v4
