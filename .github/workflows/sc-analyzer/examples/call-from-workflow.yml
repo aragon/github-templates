@@ -15,7 +15,7 @@ on:
 
 jobs:
   build-and-test:
-    uses: aragon/github-templates/sc-analyzer/workflows/security-analysis.yml@v0.0.1
+    uses: aragon/github-templates/.github/workflows/sc-analyzer/security-analysis.yml@v0.0.1
     with:
       slither: ${{ inputs.slither}}
       slither-config: ${{ inputs.slither-config}}
