@@ -93,7 +93,7 @@ jobs:
           entrypoint: bash
           args: >
             -c "slither
-            .
+            out
             --no-compile
             --sarif results.sarif
             --checklist
@@ -102,6 +102,7 @@ jobs:
             --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
             > slither-report.md"
       - name: List files
+        if: always()
         run: ls -l
       - name: Upload build artifacts
         id: upload
