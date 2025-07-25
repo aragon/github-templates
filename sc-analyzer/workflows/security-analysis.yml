@@ -1,0 +1,154 @@
+name: Security Analysis Smart Contract
+on:
+  workflow_call:
+    inputs:
+      # Tools to use
+      ## Slither
+      ### https://github.com/crytic/slither/wiki/Usage#configuration-file
+      slither:
+        required: false
+        type: boolean
+        default: true
+        description: "Enable slither"
+      slither-config:
+        required: false
+        type: string
+        default: "./slither.config.json"
+
+      # Execution inputs
+      ## Workflow runner
+      workflow-runner:
+        required: true
+        type: string
+        default: "ubuntu-latest"
+        description: "Workflow runner"
+
+      ## Build configuration
+      node-version:
+        required: false
+        type: string
+        default: "18"
+        description: "Node.js version to use"
+
+      # Results inputs
+      ## Results
+      result-path:
+        required: true
+        type: string
+        default: "results"
+        description: "results path"
+      ## Artifact configuration
+      artifact-name:
+        required: false
+        type: string
+        default: "results-artifacts"
+        description: "Name for results artifacts"
+      artifact-retention-days:
+        required: false
+        type: number
+        default: 7
+        description: "Artifact retention period in days"
+
+      # General options
+      environment:
+        required: true
+        type: string
+        default: "test"
+        description: "environment to use"
+
+    outputs:
+      artifact-id:
+        description: "ID of uploaded build artifact"
+        value: ${{ jobs.build.outputs.artifact-id }}
+
+# Concurrency control
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.environment }}
+  cancel-in-progress: true
+
+jobs:
+  # add build step?
+  slither:
+    if: ${{ inputs.enable-slither }}
+    id: slither
+    runs-on: ${{ inputs.workflow-runner }}
+    outputs:
+      version: ${{ steps.version.outputs.result }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+
+      - name: Run Slither
+        uses: crytic/slither-action@v0.4.1
+        with:
+          sarif: ${{ inputs.result-path }}/results.sarif
+          fail-on: none
+
+      - name: Upload build artifacts
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-${{ GITHUB_JOB }}-${{ github.run_id }}
+          path: |
+            ${{ inputs.result-path }}
+          retention-days: ${{ inputs.artifact-retention-days }}
+          compression-level: 6
+          if-no-files-found: warn
+        continue-on-error: false
+#  # Job 6: Final integration job (uses artifacts from all previous jobs)
+#  finalize:
+#    needs: [slither]
+#    if: always()
+#    runs-on:
+#    timeout-minutes: 10
+#    steps:
+#      - name: Checkout repository
+#        uses: actions/checkout@v4
+#        with:
+#          persist-credentials: false
+#
+#      - name: Download all artifacts
+#        uses: actions/download-artifact@v4
+#        with:
+#          path: ./all-artifacts
+#          merge-multiple: true
+#
+#      - name: Send notifications
+#        if: always() && secrets.slack-webhook
+#        run: |
+#          STATUS="✅ Success"
+#          if [ "${{ needs.build.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+#            STATUS="❌ Failed"
+#          fi
+#
+#          curl -X POST ${{ secrets.slack-webhook }} \
+#            -H 'Content-type: application/json' \
+#            --data "{
+#              \"text\": \"Build $STATUS for ${{ github.repository }}@${{ github.ref_name }}\",
+#              \"attachments\": [{
+#                \"color\": \"${{ needs.build.result == 'success' && needs.test.result == 'success' && 'good' || 'danger' }}\",
+#                \"fields\": [
+#                  {\"title\": \"Version\", \"value\": \"${{ needs.build.outputs.version }}\", \"short\": true},
+#                  {\"title\": \"Environment\", \"value\": \"${{ inputs.environment }}\", \"short\": true},
+#                  {\"title\": \"Build\", \"value\": \"${{ needs.build.result }}\", \"short\": true},
+#                  {\"title\": \"Tests\", \"value\": \"${{ needs.test.result }}\", \"short\": true}
+#                ]
+#              }]
+#            }"
+#        continue-on-error: true
+#
+#  # Job 7: Cleanup (always runs)
+#  cleanup:
+#    needs: [finalize]
+#    if: always()
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Cleanup temporary resources
+#        run: |
+#          echo "Performing cleanup operations..."
+#          # Add any cleanup logic here
+#          echo "Cleanup completed"
+#        continue-on-error: true
