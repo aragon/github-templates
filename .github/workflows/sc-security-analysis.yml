@@ -104,7 +104,7 @@ jobs:
             --checklist
             --json results.json
             --fail-none
-            --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/ > slither-report.md
+            --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} > slither-report.md
       - name: List files
         run: ls -l
       - name: Upload build artifacts
