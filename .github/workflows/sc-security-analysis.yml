@@ -33,7 +33,7 @@ on:
       # Results inputs
       ## Results
       result-path:
-        required: true
+        required: false
         type: string
         default: "results"
         description: "results path"
@@ -51,7 +51,7 @@ on:
 
       # General options
       environment:
-        required: true
+        required: false
         type: string
         default: "test"
         description: "environment to use"
