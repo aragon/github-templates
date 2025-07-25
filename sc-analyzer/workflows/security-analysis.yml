@@ -56,10 +56,10 @@ on:
         default: "test"
         description: "environment to use"
 
-    outputs:
-      artifact-id:
-        description: "ID of uploaded build artifact"
-        value: ${{ jobs.build.outputs.artifact-id }}
+#    outputs:
+#      artifact-id:
+#        description: "ID of uploaded build artifact"
+#        value: ${{ jobs.build.outputs.artifact-id }}
 
 # Concurrency control
 concurrency:
@@ -69,8 +69,9 @@ concurrency:
 jobs:
   # add build step?
   slither:
-    if: ${{ inputs.enable-slither }}
     id: slither
+    if: ${{ inputs.enable-slither }}
+
     runs-on: ${{ inputs.workflow-runner }}
     outputs:
       version: ${{ steps.version.outputs.result }}

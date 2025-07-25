@@ -2,6 +2,8 @@ name: Security analysis
 on:
   workflow_dispatch:
     inputs:
+      # Tools to use
+      ## Slither
       slither:
         description: "Enable Slither analysis"
         type: boolean
@@ -9,50 +11,24 @@ on:
       slither-config:
         required: false
         type: string
-        default: "./slither.config.json"
-
-      result-path:
-        description: "Path for analysis results"
-        type: string
-        default: "results"
-      artifact-name:
-        description: "Name for result artifacts"
-        type: string
-        default: "security-scan-results"
+        default: "./security-configs/slither.conf"
 
 jobs:
   build-and-test:
-    uses: aragon/github-templatessc-analyzer/workflows/security-analysis.yml@v0.0.1
+    uses: aragon/github-templates/sc-analyzer/workflows/security-analysis.yml@v0.0.1
     with:
-      # Job selection
-      enable-tests: true
-      enable-security-scan: true
-      enable-performance-tests: ${{ github.ref == 'refs/heads/main' }}
-
-      # Configuration
-      node-version: "18"
-      build-command: "npm run build:production"
-      test-command: "npm run test:ci"
-      environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
-
-      # Artifacts
-      artifact-name: "my-app-build"
-      artifact-retention-days: 14
-    secrets:
-      registry-token: ${{ secrets.NPM_TOKEN }}
-      sonar-token: ${{ secrets.SONAR_TOKEN }}
-      slack-webhook: ${{ secrets.SLACK_WEBHOOK }}
-
-  notify:
-    needs: [build-and-test, deploy]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Notify teams
-        run: |
-          echo "Pipeline completed!"
-          echo "Build status: ${{ needs.build-and-test.result }}"
-          echo "Deploy status: ${{ needs.deploy.result }}"
-          if [ "${{ needs.deploy.result }}" = "success" ]; then
-            echo "Application URL: ${{ needs.deploy.outputs.deployment-url }}"
-          fi
+      slither: ${{ inputs.slither}}
+      slither-config: ${{ inputs.slither-config}}
+#  notify:
+#    needs: [build-and-test, deploy]
+#    if: always()
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Notify teams
+#        run: |
+#          echo "Pipeline completed!"
+#          echo "Build status: ${{ needs.build-and-test.result }}"
+#          echo "Deploy status: ${{ needs.deploy.result }}"
+#          if [ "${{ needs.deploy.result }}" = "success" ]; then
+#            echo "Application URL: ${{ needs.deploy.outputs.deployment-url }}"
+#          fi
