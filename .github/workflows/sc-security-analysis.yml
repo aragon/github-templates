@@ -69,7 +69,6 @@ concurrency:
 jobs:
   # add build step?
   slither:
-    id: slither
     if: ${{ inputs.enable-slither }}
 
     runs-on: ${{ inputs.workflow-runner }}
@@ -92,7 +91,7 @@ jobs:
         id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact-name }}-${{ GITHUB_JOB }}-${{ github.run_id }}
+          name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
             ${{ inputs.result-path }}
           retention-days: ${{ inputs.artifact-retention-days }}
