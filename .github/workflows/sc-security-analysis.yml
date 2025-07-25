@@ -99,7 +99,7 @@ jobs:
             --json results.json
             --fail-none
             --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
-            --print markdown > slither-report.md"
+            > slither-report.md"
       - name: List files
         run: ls -l
       - name: Upload build artifacts
