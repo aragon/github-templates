@@ -100,7 +100,7 @@ jobs:
           entrypoint: slither
           args: >
             .
-            --sarif ${{ inputs.result-path }}/results.sarif
+            --sarif results.sarif
             --checklist
             --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/
             --json -
@@ -111,7 +111,7 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
-            ${{ inputs.result-path }}
+            results.sarif
             slither-report.md
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
