@@ -23,13 +23,6 @@ on:
         default: "ubuntu-latest"
         description: "Workflow runner"
 
-      ## Build configuration
-      node-version:
-        required: false
-        type: string
-        default: "18"
-        description: "Node.js version to use"
-
       # Results inputs
       ## Results
       result-path:
@@ -97,14 +90,16 @@ jobs:
       - name: Run Slither
         uses: docker://trailofbits/eth-security-toolbox:latest
         with:
-          entrypoint: slither
+          entrypoint: bash
           args: >
+            -c "slither
             .
             --sarif results.sarif
             --checklist
             --json results.json
             --fail-none
-            --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} > slither-report.md
+            --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
+            --print markdown > slither-report.md"
       - name: List files
         run: ls -l
       - name: Upload build artifacts
