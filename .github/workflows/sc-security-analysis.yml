@@ -86,6 +86,7 @@ jobs:
         with:
           sarif: ${{ inputs.result-path }}/results.sarif
           fail-on: none
+          slither-args: --checklist --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/
 
       - name: Upload build artifacts
         id: upload
@@ -94,6 +95,7 @@ jobs:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
             ${{ inputs.result-path }}
+            slither-report.md
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
