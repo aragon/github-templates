@@ -83,24 +83,27 @@ jobs:
           submodules: "recursive"
       # Build the code
       ## Foundry
-      - name: foundry-toolchain
-        uses: foundry-rs/foundry-toolchain@v1.3.1
-
-      - name: Show Forge version
-        run: forge --version
-
-      - name: Run Forge build
-        run: |
-          forge build --sizes
+      #- name: foundry-toolchain
+      #  uses: foundry-rs/foundry-toolchain@v1.4.0
+      #
+      #- name: Show Forge version
+      #  run: forge --version
+      #
+      #- name: Run Forge build
+      #  run: |
+      #    forge build --sizes
 
       # Run Slither
       - name: Run Slither
-        uses: crytic/slither-action@v0.4.1
+        uses: docker://trailofbits/eth-security-toolbox:latest
         with:
-          sarif: ${{ inputs.result-path }}/results.sarif
-          fail-on: none
-          ignore-compile: true
-          slither-args: --checklist --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/
+          entrypoint: slither
+          args: >
+            .
+            --sarif ${{ inputs.result-path }}/results.sarif
+            --checklist
+            --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/
+            --json -
 
       - name: Upload build artifacts
         id: upload
