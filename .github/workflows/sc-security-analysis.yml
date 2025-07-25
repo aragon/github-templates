@@ -69,7 +69,7 @@ concurrency:
 jobs:
   # add build step?
   slither:
-    if: ${{ inputs.enable-slither }}
+    if: ${{ inputs.slither }}
 
     runs-on: ${{ inputs.workflow-runner }}
     outputs:
