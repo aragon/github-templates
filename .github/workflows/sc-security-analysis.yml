@@ -78,16 +78,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          path: repo
           submodules: "recursive"
-      - uses: actions/checkout@v4
+      - name: Checkout templates
+        uses: actions/checkout@v4
         with:
+          path: templates
           sparse-checkout: |
             .github/workflows/sc-analyzer/default_configs
           repository: aragon/github-templates
           ref: ${{ inputs.template-ref }}
       - name: List files
         if: always()
-        run: pwd;ls -l
+        run: pwd;ls -l *
 
       # Build the code
       ## Foundry
