@@ -111,7 +111,9 @@ jobs:
         with:
           entrypoint: bash
           args: >
-            -c "cd repo ;
+            -c "cd repo
+            pwd
+            ls -la *
             slither
             .
             --sarif results.sarif
@@ -126,14 +128,8 @@ jobs:
       - name: Run Claude Code Review
         id: claude-review
         run: |
-          claude --print "gime me how many countries exist"
-
-
-
-          # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4)
-          # model: "claude-opus-4-20250514"
-
-          # Direct prompt for automated review (no @claude mention needed)
+          cd repo
+          claude --print "Read the sarif file and generate a very short summary"
 
       #- name: List files
       #  if: always()
