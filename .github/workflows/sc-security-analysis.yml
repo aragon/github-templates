@@ -70,27 +70,28 @@ jobs:
   slither:
     if: ${{ inputs.slither }}
 
-    runs-on: ${{ inputs.workflow-runner }}
+    #runs-on: ${{ inputs.workflow-runner }}
+    runs-on: [self-hosted, claude]
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # Checkout everything
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          path: repo
-          submodules: "recursive"
-
-      - name: Checkout analyzer configs
-        uses: actions/checkout@v4
-        with:
-          path: templates
-          repository: aragon/github-templates
-          ref: ${{ inputs.template-ref }}
-
-      - name: List files
-        if: always()
-        run: pwd;ls -la *
+      #- name: Checkout repository
+      #  uses: actions/checkout@v4
+      #  with:
+      #    path: repo
+      #    submodules: "recursive"
+      #
+      #- name: Checkout analyzer configs
+      #  uses: actions/checkout@v4
+      #  with:
+      #    path: templates
+      #    repository: aragon/github-templates
+      #    ref: ${{ inputs.template-ref }}
+      #
+      #- name: List files
+      #  if: always()
+      #  run: pwd;ls -la *
 
       # Build the code
       ## Foundry
@@ -105,35 +106,35 @@ jobs:
       #    forge build --sizes
       #
       # Run Slither
-      - name: Run Slither
-        uses: docker://trailofbits/eth-security-toolbox:latest
-        with:
-          entrypoint: bash
-          args: >
-            -c "cd repo ;
-            slither
-            .
-            --sarif results.sarif
-            --checklist
-            --json results.json
-            --fail-none
-            --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
-            > slither-report.md"
+      #- name: Run Slither
+      #  uses: docker://trailofbits/eth-security-toolbox:latest
+      #  with:
+      #    entrypoint: bash
+      #    args: >
+      #      -c "cd repo ;
+      #      slither
+      #      .
+      #      --sarif results.sarif
+      #      --checklist
+      #      --json results.json
+      #      --fail-none
+      #      --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
+      #      > slither-report.md"
       - name: List files
         if: always()
         run: pwd;ls -la *
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@beta
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          claude --print "gime me how many countries exist"
+
+
 
           # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4)
           # model: "claude-opus-4-20250514"
 
           # Direct prompt for automated review (no @claude mention needed)
-          direct_prompt: |
-            Search the Sarif file inside repo folder, generate a markdown fille called results_llm.md inside repo folder with a summary of the more important results
+
       - name: List files
         if: always()
         run: pwd;ls -la *
