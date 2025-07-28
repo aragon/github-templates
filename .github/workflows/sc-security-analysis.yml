@@ -66,6 +66,7 @@ concurrency:
 
 jobs:
   # add build step?
+
   slither:
     if: ${{ inputs.slither }}
 
@@ -90,7 +91,7 @@ jobs:
 
       - name: List files
         if: always()
-        run: pwd;ls -l *
+        run: pwd;ls -la *
 
       # Build the code
       ## Foundry
@@ -120,7 +121,7 @@ jobs:
             > slither-report.md"
       - name: List files
         if: always()
-        run: pwd;ls -l
+        run: pwd;ls -la
       - name: Upload build artifacts
         id: upload
         uses: actions/upload-artifact@v4
