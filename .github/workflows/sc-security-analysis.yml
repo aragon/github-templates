@@ -72,7 +72,6 @@ jobs:
 
     runs-on: ${{ inputs.workflow-runner }}
     outputs:
-      version: ${{ steps.version.outputs.result }}
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # Checkout everything
@@ -121,16 +120,27 @@ jobs:
             > slither-report.md"
       - name: List files
         if: always()
-        run: pwd;ls -la
+        run: pwd;ls -la *
+      - uses: anthropics/claude-code-action@beta
+        with:
+          mode: agent
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          override_prompt: |
+            Read the Sarif file in folder repo and create a quick summary in markdown to understand the most critical issues. I want you to name that markdown file as results_llm.md inside repo folder
+      - name: List files
+        if: always()
+        run: pwd;ls -la *
       - name: Upload build artifacts
         id: upload
         uses: actions/upload-artifact@v4
+
         with:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
-            results.sarif
-            results.json
-            slither-report.md
+            repo/results.sarif
+            repo/results.json
+            repo/slither-report.md
+            repo/results_llm.md
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
