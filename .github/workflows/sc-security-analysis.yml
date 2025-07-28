@@ -1,191 +1,120 @@
-name: Security Analysis Smart Contract
+name: Smart Contract Security Analysis Pipeline
 on:
-  workflow_call:
+  #  push:
+  #    branches: [main, develop]
+  #    paths: ["contracts/**/*.sol"]
+  #  pull_request:
+  #    branches: [main]
+  #    paths: ["contracts/**/*.sol"]
+  #  schedule:
+  #    - cron: "0 2 * * 1" # Weekly comprehensive scan
+  workflow_dispatch:
     inputs:
-      # Tools to use
-      ## Slither
-      ### https://github.com/crytic/slither/wiki/Usage#configuration-file
-      slither:
+      analysis_depth:
+        description: "Analysis depth level"
         required: true
-        type: boolean
-        default: true
-        description: "Enable slither"
-      slither-config:
-        required: false
-        type: string
-        default: "./security-configs/slither.conf"
+        default: "standard"
+        type: choice
+        options: ["quick", "standard", "comprehensive"]
 
-      # Execution inputs
-      ## Workflow runner
-      workflow-runner:
-        required: false
-        type: string
-        default: "ubuntu-latest"
-        description: "Workflow runner"
-      template-ref:
-        required: false
-        type: string
-        default: "feat/sc-analysis"
-        description: "template branch ref"
-
-      # Results inputs
-      ## Results
-      result-path:
-        required: false
-        type: string
-        default: "results"
-        description: "results path"
-      ## Artifact configuration
-      artifact-name:
-        required: false
-        type: string
-        default: "results-artifacts"
-        description: "Name for results artifacts"
-      artifact-retention-days:
-        required: false
-        type: number
-        default: 7
-        description: "Artifact retention period in days"
-
-      # General options
-      environment:
-        required: false
-        type: string
-        default: "test"
-        description: "environment to use"
-
-#    outputs:
-#      artifact-id:
-#        description: "ID of uploaded build artifact"
-#        value: ${{ jobs.build.outputs.artifact-id }}
-
-# Concurrency control
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.environment }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  issues: write
 
 jobs:
-  # add build step?
-
-  slither:
-    if: ${{ inputs.slither }}
-
-    runs-on: ${{ inputs.workflow-runner }}
+  # Context setup and change detection
+  analysis-setup:
+    runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.result }}
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      contracts-changed: ${{ steps.changes.outputs.contracts }}
+      analysis-config: ${{ steps.config.outputs.config }}
+      baseline-hash: ${{ steps.baseline.outputs.hash }}
     steps:
-      # Checkout everything
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          path: repo
-          submodules: "recursive"
+          fetch-depth: 0
 
-      - name: Checkout analyzer configs
-        uses: actions/checkout@v4
+      - name: Detect contract changes
+        uses: dorny/paths-filter@v2
+        id: changes
         with:
-          path: templates
-          repository: aragon/github-templates
-          ref: ${{ inputs.template-ref }}
+          filters: |
+            contracts:
+              - 'contracts/**/*.sol'
+              - 'test/**/*.sol'
+              - 'foundry.toml'
+              - 'hardhat.config.js'
 
-      - name: List files
-        if: always()
-        run: pwd;ls -la *
+      - name: Generate analysis baseline
+        id: baseline
+        run: |
+          # Create deterministic hash from contract sources
+          find contracts -name "*.sol" -exec sha256sum {} \; | \
+            sort | sha256sum | cut -d' ' -f1 > baseline.hash
+          echo "hash=$(cat baseline.hash)" >> $GITHUB_OUTPUT
 
-      # Build the code
-      ## Foundry
-      #- name: foundry-toolchain
-      #  uses: foundry-rs/foundry-toolchain@v1.4.0
-      #
-      #- name: Show Forge version
-      #  run: forge --version
-      #
-      #- name: Run Forge build
-      #  run: |
-      #    forge build --sizes
-      #
-      # Run Slither
-      - name: Run Slither
-        uses: docker://trailofbits/eth-security-toolbox:latest
+      - name: Load analysis configuration
+        id: config
+        run: |
+          config='{"severity_threshold": "medium", "enable_llm": true, "cost_optimization": true}'
+          echo "config=$config" >> $GITHUB_OUTPUT
+
+  # Multi-tool static analysis
+  static-analysis:
+    needs: analysis-setup
+    #if: needs.analysis-setup.outputs.contracts-changed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [slither, mythril, semgrep]
+    steps:
+      - uses: actions/checkout@v4
         with:
-          entrypoint: bash
-          args: >
-            -c "slither
-            .
-            --sarif results.sarif
-            --checklist
-            --json results.json
-            --fail-none
-            --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
-            > slither-report.md"
-      - name: List files
-        if: always()
-        run: pwd;ls -la
-      - name: Upload build artifacts
-        id: upload
+          submodules: recursive
+
+      - name: Setup Node.js and Python
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          pip install -r .github/requirements.txt
+
+      - name: Restore analysis cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/slither
+            ~/.cache/mythril
+            node_modules/.cache
+          key: analysis-${{ matrix.tool }}-${{ needs.analysis-setup.outputs.baseline-hash }}
+          restore-keys: analysis-${{ matrix.tool }}-
+
+      - name: Run static analysis
+        id: analysis
+        run: |
+          python .github/scripts/run_analysis.py \
+            --tool ${{ matrix.tool }} \
+            --config '${{ needs.analysis-setup.outputs.analysis-config }}' \
+            --output results-${{ matrix.tool }}.json \
+            --sarif results-${{ matrix.tool }}.sarif
+
+      - name: Upload raw results
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
+          name: static-analysis-${{ matrix.tool }}
           path: |
-            results.sarif
-            results.json
-            slither-report.md
-          retention-days: ${{ inputs.artifact-retention-days }}
-          compression-level: 6
-          if-no-files-found: warn
-        continue-on-error: false
-#  # Job 6: Final integration job (uses artifacts from all previous jobs)
-#  finalize:
-#    needs: [slither]
-#    if: always()
-#    runs-on:
-#    timeout-minutes: 10
-#    steps:
-#      - name: Checkout repository
-#        uses: actions/checkout@v4
-#        with:
-#          persist-credentials: false
-#
-#      - name: Download all artifacts
-#        uses: actions/download-artifact@v4
-#        with:
-#          path: ./all-artifacts
-#          merge-multiple: true
-#
-#      - name: Send notifications
-#        if: always() && secrets.slack-webhook
-#        run: |
-#          STATUS="✅ Success"
-#          if [ "${{ needs.build.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
-#            STATUS="❌ Failed"
-#          fi
-#
-#          curl -X POST ${{ secrets.slack-webhook }} \
-#            -H 'Content-type: application/json' \
-#            --data "{
-#              \"text\": \"Build $STATUS for ${{ github.repository }}@${{ github.ref_name }}\",
-#              \"attachments\": [{
-#                \"color\": \"${{ needs.build.result == 'success' && needs.test.result == 'success' && 'good' || 'danger' }}\",
-#                \"fields\": [
-#                  {\"title\": \"Version\", \"value\": \"${{ needs.build.outputs.version }}\", \"short\": true},
-#                  {\"title\": \"Environment\", \"value\": \"${{ inputs.environment }}\", \"short\": true},
-#                  {\"title\": \"Build\", \"value\": \"${{ needs.build.result }}\", \"short\": true},
-#                  {\"title\": \"Tests\", \"value\": \"${{ needs.test.result }}\", \"short\": true}
-#                ]
-#              }]
-#            }"
-#        continue-on-error: true
-#
-#  # Job 7: Cleanup (always runs)
-#  cleanup:
-#    needs: [finalize]
-#    if: always()
-#    runs-on: ubuntu-latest
-#    steps:
-#      - name: Cleanup temporary resources
-#        run: |
-#          echo "Performing cleanup operations..."
-#          # Add any cleanup logic here
-#          echo "Cleanup completed"
-#        continue-on-error: true
+            results-${{ matrix.tool }}.json
+            results-${{ matrix.tool }}.sarif
+          retention-days: 30
