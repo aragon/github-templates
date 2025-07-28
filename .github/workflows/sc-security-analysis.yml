@@ -71,11 +71,6 @@ jobs:
     if: ${{ inputs.slither }}
 
     runs-on: ${{ inputs.workflow-runner }}
-    permissions:
-      contents: read
-      pull-requests: read
-      issues: read
-      id-token: write
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
