@@ -110,7 +110,8 @@ jobs:
         with:
           entrypoint: bash
           args: >
-            -c "slither
+            -c "cd repo ;
+            slither
             .
             --sarif results.sarif
             --checklist
