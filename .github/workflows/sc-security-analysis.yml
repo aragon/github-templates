@@ -111,9 +111,9 @@ jobs:
         with:
           entrypoint: bash
           args: >
-            -c "cd repo ;
-            pwd ;
+            -c "pwd ;
             ls -la * ;
+            echo perrete ;
             slither
             .
             --sarif results.sarif
