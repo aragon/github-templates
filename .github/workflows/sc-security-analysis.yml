@@ -71,6 +71,11 @@ jobs:
     if: ${{ inputs.slither }}
 
     runs-on: ${{ inputs.workflow-runner }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -122,12 +127,18 @@ jobs:
       - name: List files
         if: always()
         run: pwd;ls -la *
-      - uses: anthropics/claude-code-action@beta
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@beta
         with:
-          mode: agent
-          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          override_prompt: |
-            Read the Sarif file in folder repo and create a quick summary in markdown to understand the most critical issues. I want you to name that markdown file as results_llm.md inside repo folder
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4)
+          # model: "claude-opus-4-20250514"
+
+          # Direct prompt for automated review (no @claude mention needed)
+          direct_prompt: |
+            Search the Sarif file inside repo folder, generate a markdown fille called results_llm.md inside repo folder with a summary of the more important results
       - name: List files
         if: always()
         run: pwd;ls -la *
