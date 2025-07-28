@@ -85,7 +85,8 @@ jobs:
         with:
           path: templates
           sparse-checkout: |
-            .github/workflows/sc-analyzer/default_configs/**
+            .github/workflows/sc-analyzer/default_configs
+          sparse-checkout-cone-mode: false
           repository: aragon/github-templates
           ref: ${{ inputs.template-ref }}
       - name: List files
