@@ -111,7 +111,8 @@ jobs:
         with:
           entrypoint: bash
           args: >
-            -c "pwd ;
+            -c "cd /repo
+            pwd ;
             ls -la * ;
             echo perrete ;
             slither
@@ -122,6 +123,8 @@ jobs:
             --fail-none
             --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
             > slither-report.md"
+          volumes:
+            - ${{ github.workspace }}/repo:/repo
       - name: List files
         if: always()
         run: pwd;ls -la *
