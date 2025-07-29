@@ -112,6 +112,7 @@ jobs:
           -v ${{ github.workspace }}/repo:/repo \
           trailofbits/eth-security-toolbox:latest \
           bash -c "cd /repo && \
+          ls -la && \
           slither . \
           --sarif results.sarif \
           --checklist \
