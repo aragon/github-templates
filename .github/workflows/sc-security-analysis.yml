@@ -110,7 +110,8 @@ jobs:
         run: |
           cd repo && \
           pwd && \
-          ls -la 
+          ls -la && \
+          sleep 2000 
           #docker run \
           #-v $(pwd):/repos \
           #trailofbits/eth-security-toolbox:latest \
