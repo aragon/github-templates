@@ -109,7 +109,7 @@ jobs:
       - name: Run Slither
         run: |
           pwd && \
-          ls -la * \
+          ls -la * && \
           docker run \
           -v ${{ github.workspace }}/repo:/repos \
           trailofbits/eth-security-toolbox:latest \
