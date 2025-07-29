@@ -112,18 +112,18 @@ jobs:
           pwd && \
           ls -la && \
           sleep 2000 
-          #docker run \
-          #-v $(pwd):/repos \
-          #trailofbits/eth-security-toolbox:latest \
-          #bash -c "cd /repos && \
-          #ls -la && \
-          #slither . \
-          #--sarif results.sarif \
-          #--checklist \
-          #--json results.json \
-          #--fail-none \
-          #--markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} \
-          #> slither-report.md"
+          docker run \
+          -v /home/gh-runner/actions-runner-dir/runner_work/ve-governance/ve-governance/repo:/repo \
+          trailofbits/eth-security-toolbox:latest \
+          bash -c "cd /repo && \
+          ls -la && \
+          slither . \
+          --sarif results.sarif \
+          --checklist \
+          --json results.json \
+          --fail-none \
+          --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} \
+          > slither-report.md"
 
       - name: List files
         if: always()
