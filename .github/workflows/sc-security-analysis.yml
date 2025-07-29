@@ -112,7 +112,7 @@ jobs:
           options: -v ${{ github.workspace }}/repo:/repo
           entrypoint: bash
           args: >
-            -c "cd /repo
+            -c "cd /repo  ;
             pwd ;
             ls -la * ;
             echo perrete ;
