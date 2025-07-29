@@ -108,13 +108,14 @@ jobs:
       # Run Slither
       - name: Run Slither
         run: |
+          cd repo && \
           pwd && \
-          ls -la * && \
+          ls -la && \
           docker run \
-          -v ${{ github.workspace }}/repo:/repos \
+          -v $(pwd):/repos \
           trailofbits/eth-security-toolbox:latest \
           bash -c "cd /repos && \
-          ls -la * && \
+          ls -la && \
           slither . \
           --sarif results.sarif \
           --checklist \
