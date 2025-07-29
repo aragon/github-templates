@@ -111,7 +111,6 @@ jobs:
           cd repo && \
           pwd && \
           ls -la && \
-          sleep 2000 
           docker run \
           -v /home/gh-runner/actions-runner-dir/runner_work/ve-governance/ve-governance/repo:/repo \
           trailofbits/eth-security-toolbox:latest \
