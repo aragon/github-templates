@@ -169,6 +169,6 @@ jobs:
         run: |
           echo "Performing cleanup operations..."
           pwd
-          rm -rf /home/runner/work/ve-governance
+          rm -rf /home/runner/work/${{ github.event.repository.name }}
 
         continue-on-error: true
