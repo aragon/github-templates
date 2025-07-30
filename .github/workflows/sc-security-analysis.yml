@@ -169,7 +169,6 @@ jobs:
         run: |
           echo "Performing cleanup operations..."
           pwd
-          ls -la *
-          whoami
+          rm -rf /home/runner/work/ve-governance
 
         continue-on-error: true
