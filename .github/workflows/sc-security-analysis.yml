@@ -47,6 +47,14 @@ on:
         default: 7
         description: "Artifact retention period in days"
 
+      #Claude
+      ## Template
+      claude-template:
+        required: false
+        type: string
+        default: "../templates/.github/workflows/sc-analyzer/default_configs/claude/claude.md"
+        description: "claude template"
+
       # General options
       environment:
         required: false
@@ -131,7 +139,7 @@ jobs:
         id: claude-review
         run: |
           cd repo
-          claude --print "Read the sarif file and generate a very short summary"
+          cat ${{ inputs.claude-template }} | claude --print
 
       #- name: List files
       #  if: always()
