@@ -114,13 +114,19 @@ jobs:
       #    forge build --sizes
       #
       # Run Slither
+      - name: test permission
+        run: |
+          ls -la /home/gh-runner
+          cd /home/gh-runner
+          pwd
+          echo "test"
       - name: Run Slither
         run: |
           cd repo && \
           pwd && \
           ls -la && \
           docker run \
-          -v /home/gh-runner/actions-runner-dir/runner_work/ve-governance/ve-governance/repo:/repo \
+          -v ${{ github.workspace }}/repo:/repo \
           trailofbits/eth-security-toolbox:latest \
           bash -c "cd /repo && \
           ls -la && \
