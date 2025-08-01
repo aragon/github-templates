@@ -119,7 +119,7 @@ jobs:
           ls -la /home/gh-runner
           cd /home/gh-runner
           pwd
-          echo "test"
+          echo "${{ github.workspace }}"
       - name: Run Slither
         run: |
           cd repo && \
