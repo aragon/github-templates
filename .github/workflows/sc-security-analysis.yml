@@ -30,7 +30,7 @@ on:
       download-repos:
         required: false
         type: boolean
-        default: false
+        default: true
         description: "download repos"
 
       # Results inputs
@@ -69,7 +69,7 @@ on:
       final-cleanup:
         required: false
         type: boolean
-        default: false
+        default: true
         description: "final cleanup"
 
 #    outputs:
@@ -103,7 +103,7 @@ jobs:
 
   slither:
     if: ${{ inputs.slither }}
-
+    needs: [download-repos]
     #runs-on: ${{ inputs.workflow-runner }}
     runs-on: [self-hosted, claude]
     outputs:
