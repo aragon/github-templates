@@ -117,12 +117,6 @@ jobs:
       #    forge build --sizes
       #
       # Run Slither
-      - name: test permission
-        run: |
-          ls -la -lR /actions-runner/_work/
-          cd /actions-runner/_work/perrete
-          pwd
-          echo "${{ github.workspace }}"
       - name: Run Slither
         run: |
           cd repo && \
