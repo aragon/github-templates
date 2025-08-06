@@ -116,8 +116,8 @@ jobs:
       # Run Slither
       - name: test permission
         run: |
-          ls -la /home/gh-runner
-          cd /home/gh-runner
+          ls -la -lR /actions-runner/_work/
+          cd /actions-runner/_work/perrete
           pwd
           echo "${{ github.workspace }}"
       - name: Run Slither
