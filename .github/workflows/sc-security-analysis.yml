@@ -35,6 +35,11 @@ on:
 
       # Results inputs
       ## Results
+      upload-artifacts:
+        required: false
+        type: boolean
+        default: true
+        description: "Select artifacts to upload"
       result-path:
         required: false
         type: string
@@ -59,6 +64,11 @@ on:
         type: string
         default: "../templates/.github/workflows/sc-analyzer/default_configs/claude/claude.md"
         description: "claude template"
+      claude:
+        required: false
+        type: boolean
+        default: true
+        description: "Claude execution"
 
       # General options
       environment:
@@ -146,19 +156,33 @@ jobs:
       - name: List files
         if: always()
         run: pwd;ls -la *
+
+  claude:
+    if: ${{ inputs.claude }}
+    needs: [slither]
+    #runs-on: ${{ inputs.workflow-runner }}
+    runs-on: [self-hosted, claude]
+    steps:
+      - name: List files
+        if: always()
+        run: pwd;ls -la *
       - name: Run Claude Code Review
         id: claude-review
         run: |
           cd repo-${{ github.run_id }}
           cat ${{ inputs.claude-template }} | claude --print > results_llm.md
 
-      #- name: List files
-      #  if: always()
-      #  run: pwd;ls -la *
+  upload-artifacts:
+    if: ${{ inputs.claude }}
+    needs: [slither, claude]
+    runs-on: [self-hosted, claude]
+    steps:
+      - name: List files
+        if: always()
+        run: pwd;ls -la *
       - name: Upload build artifacts
         id: upload
         uses: actions/upload-artifact@v4
-
         with:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
@@ -170,9 +194,7 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
         continue-on-error: false
-
   cleanup:
-    needs: [slither]
     if: always() && ${{ inputs.final-cleanup }}
     runs-on: [self-hosted, claude]
     steps:
