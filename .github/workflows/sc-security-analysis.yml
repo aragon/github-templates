@@ -61,6 +61,11 @@ on:
         type: string
         default: "test"
         description: "environment to use"
+      final-cleanup:
+        required: false
+        type: boolean
+        default: true
+        description: "final cleanup"
 
 #    outputs:
 #      artifact-id:
@@ -73,16 +78,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # add build step?
-
   slither:
     if: ${{ inputs.slither }}
 
     #runs-on: ${{ inputs.workflow-runner }}
     runs-on: [self-hosted, claude]
-    container:
-      image: ubuntu:latest
-
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -90,5 +90,94 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          path: repo
+          path: repo-${{ github.run_id }}
           submodules: "recursive"
+
+      - name: Checkout analyzer configs
+        uses: actions/checkout@v4
+        with:
+          path: templates-${{ github.run_id }}
+          repository: aragon/github-templates
+          ref: ${{ inputs.template-ref }}
+
+      - name: List files
+        if: always()
+        run: pwd;ls -la *
+
+      # Build the code
+      ## Foundry
+      #- name: foundry-toolchain
+      #  uses: foundry-rs/foundry-toolchain@v1.4.0
+      #
+      #- name: Show Forge version
+      #  run: forge --version
+      #
+      #- name: Run Forge build
+      #  run: |
+      #    forge build --sizes
+      #
+      # Run Slither
+      - name: test permission
+        run: |
+          ls -la -lR /actions-runner/_work/
+          cd /actions-runner/_work/perrete
+          pwd
+          echo "${{ github.workspace }}"
+      - name: Run Slither
+        run: |
+          cd repo && \
+          pwd && \
+          ls -la && \
+          docker run \
+          -v ${{ github.workspace }}/repo-${{ github.run_id }}:/repo \
+          trailofbits/eth-security-toolbox:latest \
+          bash -c "cd /repo && \
+          ls -la && \
+          slither . \
+          --sarif results.sarif \
+          --checklist \
+          --json results.json \
+          --fail-none \
+          --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} \
+          > slither-report.md"
+
+      - name: List files
+        if: always()
+        run: pwd;ls -la *
+      - name: Run Claude Code Review
+        id: claude-review
+        run: |
+          cd repo-${{ github.run_id }}
+          cat ${{ inputs.claude-template }} | claude --print
+
+      #- name: List files
+      #  if: always()
+      #  run: pwd;ls -la *
+      - name: Upload build artifacts
+        id: upload
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
+          path: |
+            repo/results.sarif
+            repo/results.json
+            repo/slither-report.md
+            repo/results_llm.md
+          retention-days: ${{ inputs.artifact-retention-days }}
+          compression-level: 6
+          if-no-files-found: warn
+        continue-on-error: false
+
+  cleanup:
+    needs: [slither]
+    if: ${{ inputs.final-cleanup }}
+    runs-on: [self-hosted, claude]
+    steps:
+      - name: Cleanup temporary resources
+        run: |
+          echo "Performing cleanup operations..."
+          pwd
+          rm -rf "${{ github.workspace }}/*-${{ github.run_id }}"
+
+        continue-on-error: true
