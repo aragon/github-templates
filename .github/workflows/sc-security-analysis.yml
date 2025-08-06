@@ -123,9 +123,9 @@ jobs:
           pwd && \
           ls -la && \
           docker run \
-          -v ${{ github.workspace }}/repo-${{ github.run_id }}:/repo \
+          -v runner_data_0:/mount_vol \
           trailofbits/eth-security-toolbox:latest \
-          bash -c "cd /repo && \
+          bash -c "cd /mount_vol/${{ github.workspace }}/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \
           --sarif results.sarif \
@@ -165,7 +165,7 @@ jobs:
 
   cleanup:
     needs: [slither]
-    if: ${{ inputs.final-cleanup }}
+    if: always() && ${{ inputs.final-cleanup }}
     runs-on: [self-hosted, claude]
     steps:
       - name: Cleanup temporary resources
