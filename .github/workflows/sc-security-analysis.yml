@@ -119,7 +119,6 @@ jobs:
       # Run Slither
       - name: Run Slither
         run: |
-          cd repo && \
           pwd && \
           ls -la && \
           docker run \
