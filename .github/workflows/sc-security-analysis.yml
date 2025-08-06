@@ -27,6 +27,11 @@ on:
         type: string
         default: "feat/sc-analysis"
         description: "template branch ref"
+      download-repos:
+        required: false
+        type: boolean
+        default: false
+        description: "download repos"
 
       # Results inputs
       ## Results
@@ -64,7 +69,7 @@ on:
       final-cleanup:
         required: false
         type: boolean
-        default: true
+        default: false
         description: "final cleanup"
 
 #    outputs:
@@ -78,13 +83,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  slither:
-    if: ${{ inputs.slither }}
-
-    #runs-on: ${{ inputs.workflow-runner }}
+  download-repos:
+    if: ${{ inputs.download-repos }}
     runs-on: [self-hosted, claude]
-    outputs:
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # Checkout everything
       - name: Checkout repository
@@ -100,6 +101,14 @@ jobs:
           repository: aragon/github-templates
           ref: ${{ inputs.template-ref }}
 
+  slither:
+    if: ${{ inputs.slither }}
+
+    #runs-on: ${{ inputs.workflow-runner }}
+    runs-on: [self-hosted, claude]
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
       - name: List files
         if: always()
         run: pwd;ls -la *
@@ -121,7 +130,7 @@ jobs:
         run: |
           pwd && \
           ls -la && \
-          docker run \
+          docker run --rm \
           -v runner_data_0:/mount_vol \
           trailofbits/eth-security-toolbox:latest \
           bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
@@ -141,7 +150,7 @@ jobs:
         id: claude-review
         run: |
           cd repo-${{ github.run_id }}
-          cat ${{ inputs.claude-template }} | claude --print
+          cat ${{ inputs.claude-template }} | claude --print > results_llm.md
 
       #- name: List files
       #  if: always()
@@ -153,10 +162,10 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
-            repo/results.sarif
-            repo/results.json
-            repo/slither-report.md
-            repo/results_llm.md
+            repo-${{ github.run_id }}/results.sarif
+            repo-${{ github.run_id }}/results.json
+            repo-${{ github.run_id }}/slither-report.md
+            repo-${{ github.run_id }}/results_llm.md
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
