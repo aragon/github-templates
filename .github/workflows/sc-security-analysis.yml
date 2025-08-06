@@ -124,7 +124,7 @@ jobs:
           docker run \
           -v runner_data_0:/mount_vol \
           trailofbits/eth-security-toolbox:latest \
-          bash -c "cd /mount_vol/${{ github.workspace }}/repo-${{ github.run_id }} && \
+          bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \
           --sarif results.sarif \
