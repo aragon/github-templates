@@ -152,7 +152,7 @@ jobs:
           --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
           --fail-none \
           --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} \
-          > ${{ inputs.result-path }}-${{ github.run_id }}slither-report.md"
+          > ${{ inputs.result-path }}-${{ github.run_id }}/slither-report.md"
 
       - name: List files
         if: always()
