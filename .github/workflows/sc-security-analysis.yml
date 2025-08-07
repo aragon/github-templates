@@ -103,7 +103,8 @@ jobs:
         with:
           path: repo-${{ github.run_id }}
           submodules: "recursive"
-
+      - name: Create results directory
+        run: mkdir -p repo-${{ github.run_id }}/${{ inputs.result-path }}-${{ github.run_id }}
       - name: Checkout analyzer configs
         uses: actions/checkout@v4
         with:
@@ -146,12 +147,12 @@ jobs:
           bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \
-          --sarif results.sarif \
+          --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
           --checklist \
-          --json results.json \
+          --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
           --fail-none \
           --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} \
-          > slither-report.md"
+          > ${{ inputs.result-path }}-${{ github.run_id }}slither-report.md"
 
       - name: List files
         if: always()
@@ -170,7 +171,7 @@ jobs:
         id: claude-review
         run: |
           cd repo-${{ github.run_id }}
-          cat ${{ inputs.claude-template }} | claude --print > results_llm.md
+          cat ${{ inputs.claude-template }} | claude --print > ${{ inputs.result-path }}-${{ github.run_id }}/results_llm.md
 
   upload-artifacts:
     if: ${{ inputs.claude }}
@@ -186,10 +187,8 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
-            repo-${{ github.run_id }}/results.sarif
-            repo-${{ github.run_id }}/results.json
-            repo-${{ github.run_id }}/slither-report.md
-            repo-${{ github.run_id }}/results_llm.md
+            repo-${{ github.run_id }}/${{ inputs.result-path }}-${{ github.run_id }}/*
+
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
