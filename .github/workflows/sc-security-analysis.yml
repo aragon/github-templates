@@ -141,7 +141,7 @@ jobs:
         run: |
           pwd && \
           ls -la && \
-          docker run -u 1001:1001 --rm \
+          docker run --rm \
           -v runner_data_0:/mount_vol \
           trailofbits/eth-security-toolbox:latest \
           bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
@@ -202,6 +202,10 @@ jobs:
         run: |
           echo "Performing cleanup operations..."
           pwd
+          docker run --rm \
+          -v runner_data_0:/mount_vol \
+          ubuntu \
+          bash -c "rm -rf /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )"
           rm -rf ${{ github.workspace }}/*-${{ github.run_id }}
 
         continue-on-error: true
