@@ -163,7 +163,7 @@ jobs:
           -v runner_data_0:/mount_vol \
           --env-file ${{ env.DOCKER_ENV_SLITHER }} \
           trailofbits/eth-security-toolbox:latest \
-          bash -c "set -x && cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
+          bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \
           --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
