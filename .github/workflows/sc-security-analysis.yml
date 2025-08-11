@@ -165,7 +165,7 @@ jobs:
           trailofbits/eth-security-toolbox:latest \
           bash -c "set -x && cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
-          slither . \ 
+          slither . \
           --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
           --checklist \
           --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
