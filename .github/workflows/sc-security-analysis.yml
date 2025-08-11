@@ -166,11 +166,11 @@ jobs:
           bash -c "set -x && cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \ 
-          \$SLITHER_INCLUDE_PATHS \
           --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
           --checklist \
           --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
           --fail-none \
+          \$SLITHER_INCLUDE_PATHS \
           --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} \
           > ${{ inputs.result-path }}-${{ github.run_id }}/slither-report.md"
 
