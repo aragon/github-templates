@@ -124,10 +124,22 @@ jobs:
     runs-on: [self-hosted, claude]
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      DOCKER_ENV_SLITHER: ".env.slither"
     steps:
       - name: List files
-        if: always()
         run: pwd;ls -la *
+      - name: Prepare config
+        run: |
+          FILE_NAME=${{ env.DOCKER_ENV_SLITHER }}
+
+          ## Include files
+
+          if [[ ${{inputs.slither-include-paths}} == "" ]];then
+            SLITHER_INCLUDE_PATHS="" >> $FILE_NAME
+          else
+            SLITHER_INCLUDE_PATHS='--include-paths ${{inputs.slither-include-paths}}' >> $FILE_NAME
+          fi
 
       # Build the code
       ## Foundry
@@ -145,17 +157,18 @@ jobs:
       - name: Run Slither
 
         env:
-          slither-include-paths: ${{ if(ne(inputs.slither-include-paths, ''), '--include-paths ' + inputs.slither-include-paths, '') }}
+          slither-include-paths: ${{ inputs.slither-include-paths }}
         run: |
           pwd && \
           ls -la && \
           docker run --rm \
           -v runner_data_0:/mount_vol \
+          -e ${{ env.DOCKER_ENV_SLITHER }} \
           trailofbits/eth-security-toolbox:latest \
           bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
-          slither . \
-          ${{ env.SLITHER_INCLUDE_PATHS }} \
+          slither . \ 
+          $SLITHER_INCLUDE_PATHS \
           --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
           --checklist \
           --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
