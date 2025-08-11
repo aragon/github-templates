@@ -14,6 +14,11 @@ on:
         required: false
         type: string
         default: "./security-configs/slither.conf"
+      slither-include-paths:
+        required: false
+        type: string
+        default: ""
+        description: "Slither include paths"
 
       # Execution inputs
       ## Workflow runner
@@ -138,6 +143,9 @@ jobs:
       #
       # Run Slither
       - name: Run Slither
+
+        env:
+          slither-include-paths: ${{ if(ne(inputs.slither-include-paths, ''), '--include-paths ' + inputs.slither-include-paths, '') }}
         run: |
           pwd && \
           ls -la && \
@@ -147,7 +155,7 @@ jobs:
           bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \
-          --filter-paths src/queue \
+          ${{ env.SLITHER_INCLUDE_PATHS }} \
           --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
           --checklist \
           --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
