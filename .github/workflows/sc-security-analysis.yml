@@ -168,7 +168,7 @@ jobs:
           bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \ 
-          $SLITHER_INCLUDE_PATHS \
+          \$SLITHER_INCLUDE_PATHS \
           --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
           --checklist \
           --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
