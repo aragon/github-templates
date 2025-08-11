@@ -136,9 +136,9 @@ jobs:
           ## Include files
 
           if [[ ${{inputs.slither-include-paths}} == "" ]];then
-            SLITHER_INCLUDE_PATHS="" >> $FILE_NAME
+            echo "SLITHER_INCLUDE_PATHS= " >> $FILE_NAME
           else
-            SLITHER_INCLUDE_PATHS='--include-paths ${{inputs.slither-include-paths}}' >> $FILE_NAME
+            echo "SLITHER_INCLUDE_PATHS=--include-paths ${{inputs.slither-include-paths}}" >> $FILE_NAME
           fi
 
       # Build the code
@@ -155,9 +155,6 @@ jobs:
       #
       # Run Slither
       - name: Run Slither
-
-        env:
-          slither-include-paths: ${{ inputs.slither-include-paths }}
         run: |
           pwd && \
           ls -la && \
