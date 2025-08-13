@@ -109,7 +109,7 @@ jobs:
           path: repo-${{ github.run_id }}
           submodules: "recursive"
       - name: Create results directory
-        run: mkdir -p repo-${{ github.run_id }}/${{ inputs.result-path }}-${{ github.run_id }}
+        run: mkdir -p repo-${{ github.run_id }}/${{ inputs.result-path }}
       - name: Checkout analyzer configs
         uses: actions/checkout@v4
         with:
@@ -166,13 +166,13 @@ jobs:
           bash -c "cd /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )/repo-${{ github.run_id }} && \
           ls -la && \
           slither . \
-          --sarif ${{ inputs.result-path }}-${{ github.run_id }}/results.sarif \
+          --sarif ${{ inputs.result-path }}/results.sarif \
           --checklist \
-          --json ${{ inputs.result-path }}-${{ github.run_id }}/results.json \
+          --json ${{ inputs.result-path }}/results.json \
           --fail-none \
           \$SLITHER_INCLUDE_PATHS \
           --markdown-root ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }} \
-          > ${{ inputs.result-path }}-${{ github.run_id }}/slither-report.md"
+          > ${{ inputs.result-path }}/slither-report.md"
 
       - name: List files
         if: always()
@@ -191,7 +191,7 @@ jobs:
         id: claude-review
         run: |
           cd repo-${{ github.run_id }}
-          cat ${{ inputs.claude-template }} | claude --dangerously-skip-permissions --print
+          envsubst < ${{ inputs.claude-template }} | claude --dangerously-skip-permissions --print
 
   upload-artifacts:
     if: ${{ inputs.upload-artifacts }}
@@ -207,8 +207,8 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
-            repo-${{ github.run_id }}/${{ inputs.result-path }}-${{ github.run_id }}/*
-            repo-${{ github.run_id }}/exploits*
+            repo-${{ github.run_id }}/${{ inputs.result-path }}/*
+            repo-${{ github.run_id }}/exploits/*
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
