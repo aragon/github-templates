@@ -155,6 +155,7 @@ jobs:
       #    forge build --sizes
       #
       # Run Slither
+      ## https://github.com/crytic/slither/wiki/Printer-documentation#inheritance-graph
       - name: Run Slither
         run: |
           pwd && \
