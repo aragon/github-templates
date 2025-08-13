@@ -118,7 +118,10 @@ jobs:
           ref: ${{ inputs.template-ref }}
 
   slither:
-    if: ${{ inputs.slither }}
+    if: |
+      always() &&
+      (needs.download-repos.outputs.all || needs.download-repos.outputs.slither) && 
+      ${{ inputs.slither }}
     needs: [download-repos]
     #runs-on: ${{ inputs.workflow-runner }}
     runs-on: [self-hosted, claude]
