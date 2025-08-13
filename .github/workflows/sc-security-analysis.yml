@@ -183,11 +183,14 @@ jobs:
     needs: [slither]
     #runs-on: ${{ inputs.workflow-runner }}
     runs-on: [self-hosted, claude]
+
     steps:
       - name: List files
         if: always()
         run: pwd;ls -la *
       - name: Run Claude Code Review
+        env:
+          paths-to-analyze: ${{ inputs.paths-to-analyze }}
         id: claude-review
         run: |
           cd repo-${{ github.run_id }}
