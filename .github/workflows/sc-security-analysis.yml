@@ -118,7 +118,7 @@ jobs:
           ref: ${{ inputs.template-ref }}
 
   slither:
-    if: ${{ cancelled() || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') }} && ${{ inputs.slither }}
+    if: ${{ inputs.slither && always() }}
     needs: [download-repos]
     #runs-on: ${{ inputs.workflow-runner }}
     runs-on: [self-hosted, claude]
