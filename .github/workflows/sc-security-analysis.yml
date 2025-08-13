@@ -35,7 +35,7 @@ on:
       download-repos:
         required: false
         type: boolean
-        default: true
+        default: false
         description: "download repos"
 
       # Results inputs
@@ -191,10 +191,10 @@ jobs:
         id: claude-review
         run: |
           cd repo-${{ github.run_id }}
-          cat ${{ inputs.claude-template }} | claude --dangerously-skip-permissions --print > ${{ inputs.result-path }}-${{ github.run_id }}/results_llm_$(echo "${{ inputs.claude-template }}" | tr -d' ').md
+          cat ${{ inputs.claude-template }} | claude --dangerously-skip-permissions --print
 
   upload-artifacts:
-    if: ${{ inputs.claude }}
+    if: ${{ inputs.upload-artifacts }}
     needs: [slither, claude]
     runs-on: [self-hosted, claude]
     steps:
