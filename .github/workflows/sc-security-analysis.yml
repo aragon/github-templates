@@ -216,7 +216,6 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
-        continue-on-error: false
   cleanup:
     needs: [upload-artifacts]
     if: |
