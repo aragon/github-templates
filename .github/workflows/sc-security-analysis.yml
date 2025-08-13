@@ -219,7 +219,11 @@ jobs:
         continue-on-error: false
   cleanup:
     needs: [upload-artifacts]
-    if: always() && ${{ inputs.final-cleanup }}
+    if: |
+      always() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      ${{ inputs.final-cleanup }}
     runs-on: [self-hosted, claude]
     steps:
       - name: Cleanup temporary resources
