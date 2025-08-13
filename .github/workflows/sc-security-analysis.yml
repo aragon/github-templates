@@ -176,7 +176,6 @@ jobs:
           > ${{ inputs.result-path }}/slither-report.md"
 
       - name: List files
-        if: always()
         run: pwd;ls -la *
 
   claude:
@@ -187,7 +186,6 @@ jobs:
 
     steps:
       - name: List files
-        if: always()
         run: pwd;ls -la *
       - name: Run Claude Code Review
         env:
@@ -201,9 +199,9 @@ jobs:
     if: ${{ inputs.upload-artifacts }}
     needs: [slither, claude]
     runs-on: [self-hosted, claude]
+
     steps:
       - name: List files
-        if: always()
         run: pwd;ls -la *
       - name: Upload build artifacts
         id: upload
@@ -216,10 +214,13 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
+
   cleanup:
     needs: [upload-artifacts]
     if: |
-      always() && ${{inputs.final-cleanup}}
+      always() && 
+      inputs.final-cleanup && 
+      !cancelled()
     runs-on: [self-hosted, claude]
     steps:
       - name: Cleanup temporary resources
