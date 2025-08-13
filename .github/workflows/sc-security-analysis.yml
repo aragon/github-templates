@@ -6,19 +6,19 @@ on:
       ## Slither
       ### https://github.com/crytic/slither/wiki/Usage#configuration-file
       slither:
-        required: true
+        required: false
         type: boolean
-        default: true
+        default: false
         description: "Enable slither"
       slither-config:
         required: false
         type: string
         default: "./security-configs/slither.conf"
-      slither-include-paths:
+      paths-to-analyze:
         required: false
         type: string
         default: ""
-        description: "Slither include paths"
+        description: "include paths to analyze"
 
       # Execution inputs
       ## Workflow runner
@@ -43,7 +43,7 @@ on:
       upload-artifacts:
         required: false
         type: boolean
-        default: true
+        default: false
         description: "Select artifacts to upload"
       result-path:
         required: false
@@ -72,7 +72,7 @@ on:
       claude:
         required: false
         type: boolean
-        default: true
+        default: false
         description: "Claude execution"
 
       # General options
@@ -135,10 +135,10 @@ jobs:
 
           ## Include files
 
-          if [[ ${{inputs.slither-include-paths}} == "" ]];then
+          if [[ ${{inputs.paths-to-analyze}} == "" ]];then
             echo "SLITHER_INCLUDE_PATHS= " >> $FILE_NAME
           else
-            echo "SLITHER_INCLUDE_PATHS=--include-paths ${{inputs.slither-include-paths}}" >> $FILE_NAME
+            echo "SLITHER_INCLUDE_PATHS=--include-paths ${{inputs.paths-to-analyze}}" >> $FILE_NAME
           fi
           cat $FILE_NAME
 
@@ -191,7 +191,7 @@ jobs:
         id: claude-review
         run: |
           cd repo-${{ github.run_id }}
-          cat ${{ inputs.claude-template }} | claude --print > ${{ inputs.result-path }}-${{ github.run_id }}/results_llm.md
+          cat ${{ inputs.claude-template }} | claude --dangerously-skip-permissions --print > ${{ inputs.result-path }}-${{ github.run_id }}/results_llm_$(echo "${{ inputs.claude-template }}" | tr -d' ').md
 
   upload-artifacts:
     if: ${{ inputs.claude }}
