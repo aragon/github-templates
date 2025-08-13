@@ -180,7 +180,7 @@ jobs:
         run: pwd;ls -la *
 
   claude:
-    if: always() && ${{ inputs.claude }}
+    if: ${{ inputs.claude }}
     needs: [slither]
     #runs-on: ${{ inputs.workflow-runner }}
     runs-on: [self-hosted, claude]
@@ -219,10 +219,7 @@ jobs:
   cleanup:
     needs: [upload-artifacts]
     if: |
-      always() &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled') &&
-      ${{ inputs.final-cleanup }}
+      always()
     runs-on: [self-hosted, claude]
     steps:
       - name: Cleanup temporary resources
@@ -234,5 +231,3 @@ jobs:
           ubuntu \
           bash -c "rm -rf /mount_vol/$(echo ${{ github.workspace }} |cut -d'/' -f4- )"
           rm -rf ${{ github.workspace }}/*-${{ github.run_id }}
-
-        continue-on-error: true
