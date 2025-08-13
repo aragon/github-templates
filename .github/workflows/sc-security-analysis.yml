@@ -208,7 +208,7 @@ jobs:
           name: ${{ inputs.artifact-name }}-${{ github.job }}-${{ github.run_id }}
           path: |
             repo-${{ github.run_id }}/${{ inputs.result-path }}-${{ github.run_id }}/*
-
+            repo-${{ github.run_id }}/exploits*
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
           if-no-files-found: warn
