@@ -217,7 +217,7 @@ jobs:
 
   cleanup:
     needs: [upload-artifacts]
-    if: ${{ inputs.final-cleanup }}
+    if: always() && ${{ inputs.final-cleanup }}
     runs-on: [self-hosted, claude]
     steps:
       - name: Cleanup temporary resources
