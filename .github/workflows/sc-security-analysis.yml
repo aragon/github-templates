@@ -179,7 +179,7 @@ jobs:
         run: pwd;ls -la *
 
   claude:
-    if: ${{ inputs.claude }}
+    if: ${{ inputs.claude && always() }}
     needs: [slither]
     #runs-on: ${{ inputs.workflow-runner }}
     runs-on: [self-hosted, claude]
@@ -196,7 +196,7 @@ jobs:
           envsubst < ${{ inputs.claude-template }} | claude --dangerously-skip-permissions --print
 
   upload-artifacts:
-    if: ${{ inputs.upload-artifacts }}
+    if: ${{ inputs.upload-artifacts && always() }}
     needs: [slither, claude]
     runs-on: [self-hosted, claude]
 
