@@ -1,0 +1,234 @@
+# Reusable Release — Start. Engine-agnostic orchestration:
+#   guard one-active-release → compute version (pluggable engine) → cut release/<version> →
+#   bump + changelog → release summary → open PR → start Slack thread.
+# Does NOT deploy and does NOT tag (release-finalize owns tagging on PR merge).
+#
+# Repo-specific policies (stale-lineage guard, DB-migration detection, hotfix specifics) belong in
+# the caller's thin wrapper, not here.
+#
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+
+name: Release — Start
+
+on:
+  workflow_call:
+    inputs:
+      engine:
+        description: "'changesets' or 'semantic-release'"
+        required: true
+        type: string
+      base-ref:
+        description: "Commit/branch to start the release from"
+        required: false
+        type: string
+        default: ${{ github.ref_name }}
+      target-branch:
+        description: "Branch the release PR targets"
+        required: false
+        type: string
+        default: main
+      release-branch-prefix:
+        description: "Prefix for the release branch"
+        required: false
+        type: string
+        default: "release/"
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT used for checkout + PR creation"
+        required: true
+        type: string
+      op-gpg-key-path:
+        description: "1Password path to a GPG private key for signed commits (optional)"
+        required: false
+        type: string
+        default: ""
+      op-gpg-passphrase-path:
+        description: "1Password path to the GPG passphrase (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+      op-linear-token-path:
+        description: "1Password path to a Linear API token to enrich the summary (optional)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token scoped to the caller repo's vault"
+        required: true
+    outputs:
+      version:
+        value: ${{ jobs.start.outputs.version }}
+      released:
+        value: ${{ jobs.start.outputs.released }}
+      pr-url:
+        value: ${{ jobs.start.outputs.pr-url }}
+      pr-number:
+        value: ${{ jobs.start.outputs.pr-number }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-start-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      released: ${{ steps.version.outputs.released }}
+      pr-url: ${{ steps.pr.outputs.url }}
+      pr-number: ${{ steps.pr.outputs.number }}
+    steps:
+      - name: Validate 1Password inputs
+        env:
+          PATHS: |
+            ${{ inputs.op-release-token-path }}
+            ${{ inputs.op-gpg-key-path }}
+            ${{ inputs.op-gpg-passphrase-path }}
+            ${{ inputs.op-slack-bot-token-path }}
+            ${{ inputs.op-slack-channel-id-path }}
+            ${{ inputs.op-linear-token-path }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r p; do
+            [ -z "${p// }" ] && continue
+            if ! [[ "$p" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
+              echo "::error::Invalid op:// path: $p" >&2
+              exit 1
+            fi
+          done <<< "$PATHS"
+
+      - name: Load secrets
+        id: secrets
+        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          RELEASE_TOKEN: ${{ inputs.op-release-token-path }}
+          GPG_PRIVATE_KEY: ${{ inputs.op-gpg-key-path }}
+          GPG_PASSPHRASE: ${{ inputs.op-gpg-passphrase-path }}
+          SLACK_BOT_TOKEN: ${{ inputs.op-slack-bot-token-path }}
+          SLACK_CHANNEL_ID: ${{ inputs.op-slack-channel-id-path }}
+          LINEAR_API_TOKEN: ${{ inputs.op-linear-token-path }}
+
+      - name: Setup
+        uses: aragon/github-templates/steps/setup@main
+        with:
+          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          ref: ${{ inputs.base-ref }}
+          fetch-depth: "0"
+
+      - name: Guard — only one active release
+        env:
+          GH_TOKEN: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+          PREFIX: ${{ inputs.release-branch-prefix }}
+        run: |
+          set -euo pipefail
+          OPEN=$(gh pr list --base "$TARGET_BRANCH" --state open --json headRefName \
+            -q "[.[] | select(.headRefName | startswith(\"$PREFIX\"))] | length")
+          if [ "${OPEN:-0}" -ne 0 ]; then
+            echo "::error::An active release PR already exists — only one active release at a time." >&2
+            exit 1
+          fi
+
+      - name: Import GPG key
+        if: inputs.op-gpg-key-path != ''
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ steps.secrets.outputs.GPG_PRIVATE_KEY }}
+          passphrase: ${{ steps.secrets.outputs.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+
+      - name: Compute version
+        id: version
+        uses: aragon/github-templates/steps/compute-version@main
+        with:
+          engine: ${{ inputs.engine }}
+          base-branch: ${{ inputs.base-ref }}
+          github-token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+
+      - name: Nothing to release
+        if: steps.version.outputs.released != 'true'
+        run: echo "::notice::No releasable changes — stopping without opening a release PR."
+
+      - name: Create release branch
+        id: branch
+        if: steps.version.outputs.released == 'true'
+        env:
+          PREFIX: ${{ inputs.release-branch-prefix }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          BR="${PREFIX}${VERSION}"
+          git checkout -b "$BR"
+          echo "name=$BR" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release summary
+        id: summary
+        if: steps.version.outputs.released == 'true'
+        uses: aragon/github-templates/steps/generate-release-summary@main
+        with:
+          linear-api-token: ${{ steps.secrets.outputs.LINEAR_API_TOKEN }}
+
+      - name: Commit & push
+        if: steps.version.outputs.released == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          # Only the release artifacts — never `git add -A` (would sweep scratch files).
+          git add package.json CHANGELOG.md
+          git commit -m "chore(release): ${VERSION}"
+          git push --force origin "$BRANCH"
+
+      - name: Open release PR
+        id: pr
+        if: steps.version.outputs.released == 'true'
+        uses: aragon/github-templates/steps/gh-ensure-pr@main
+        with:
+          base: ${{ inputs.target-branch }}
+          head: ${{ steps.branch.outputs.name }}
+          title: "Release v${{ steps.version.outputs.version }}"
+          body: ${{ steps.summary.outputs.summary }}
+          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+
+      - name: Notify Slack — release started
+        id: slack
+        if: ${{ steps.version.outputs.released == 'true' && inputs.op-slack-bot-token-path != '' }}
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ steps.secrets.outputs.SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ steps.secrets.outputs.SLACK_CHANNEL_ID }}
+          message: |
+            :rocket: *Release v${{ steps.version.outputs.version }} started*
+            *PR:* ${{ steps.pr.outputs.url }}
+            Branch: `${{ steps.branch.outputs.name }}` · by ${{ github.actor }}
+
+      - name: Persist Slack thread marker on PR
+        if: ${{ steps.slack.outputs.ts != '' }}
+        env:
+          GH_TOKEN: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          SLACK_TS: ${{ steps.slack.outputs.ts }}
+        run: |
+          set -euo pipefail
+          BODY="$(gh pr view "$PR_NUMBER" --json body -q .body)"
+          printf '%s\n\n<!-- slack_ts: %s -->\n' "$BODY" "$SLACK_TS" > body.md
+          gh pr edit "$PR_NUMBER" --body-file body.md

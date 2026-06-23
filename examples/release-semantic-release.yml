@@ -1,0 +1,44 @@
+# Example: semantic-release release (scenario C backend).
+# Same orchestration as the changesets example — only `engine` changes. Repo-specific policies
+# (stale-lineage guard, DB-migration detection) live in this caller as separate jobs/steps, NOT in
+# the shared module. Pin @main to a SHA in real use.
+
+name: Release (semantic-release)
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  start:
+    if: github.event_name == 'workflow_dispatch'
+    uses: aragon/github-templates/.github/workflows/release-start.yml@main
+    with:
+      engine: semantic-release
+      base-ref: ${{ github.ref_name }}
+      op-release-token-path: op://kv_backend2_infra/ARABOT_APP_BACKEND_RELEASES/credential
+      op-gpg-key-path: op://kv_backend2_infra/arabot-1_SIGN_CERTS/private_key
+      op-gpg-passphrase-path: op://kv_backend2_infra/arabot-1_SIGN_CERTS/credential
+      op-slack-bot-token-path: op://kv_backend2_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_backend2_infra/SLACK_CHANNEL_ID/credential
+      op-linear-token-path: op://kv_backend2_infra/LINEAR_API_TOKEN/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_BACKEND2_INFRA }}
+
+  finalize:
+    if: >
+      github.event_name == 'pull_request'
+      && github.event.pull_request.merged == true
+      && (startsWith(github.event.pull_request.head.ref, 'release/')
+          || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
+    uses: aragon/github-templates/.github/workflows/release-finalize.yml@main
+    with:
+      merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
+      pr-body: ${{ github.event.pull_request.body }}
+      op-release-token-path: op://kv_backend2_infra/ARABOT_APP_BACKEND_RELEASES/credential
+      op-slack-bot-token-path: op://kv_backend2_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_backend2_infra/SLACK_CHANNEL_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_BACKEND2_INFRA }}

@@ -1,0 +1,27 @@
+# Example: deploy a backend service over SSH (scenario C). The repo supplies its own remote deploy
+# command; SSH credentials are resolved from 1Password inside the module. Pin @main to a SHA.
+
+name: Deploy (backend)
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment"
+        required: true
+        default: staging
+        type: choice
+        options: [sandbox, development, staging, production]
+
+jobs:
+  deploy:
+    uses: aragon/github-templates/.github/workflows/deploy-docker.yml@main
+    with:
+      env: ${{ inputs.env }}
+      remote-path: ~/app-backend
+      deploy-command: bash scripts/app-deploy.sh ${{ inputs.env }}
+      op-ssh-key-path: op://apikeys_production/backend2_server_${{ inputs.env }}/deploy_cert
+      op-ssh-user-path: op://apikeys_production/backend2_server_${{ inputs.env }}/username
+      op-ssh-host-path: op://apikeys_production/backend2_server_${{ inputs.env }}/URL
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_TEMP }}

@@ -1,0 +1,156 @@
+# Reusable E2E workflow — runs Playwright tests (smoke or build-verification) against a deployed URL.
+#
+# SELF-REFERENCE NOTE: composite actions are referenced as `aragon/github-templates/steps/*@main`
+# because a relative `./steps/*` inside a reusable workflow would resolve against the CALLER repo,
+# not this one. `@main` is the bootstrap default — `release-self` + Dependabot pin these to the cut
+# tag/SHA once a release is published.
+
+name: E2E
+
+on:
+  workflow_call:
+    inputs:
+      deployment-url:
+        description: "Base URL to run E2E tests against"
+        required: true
+        type: string
+      environment:
+        description: "Environment name (used for artifact naming)"
+        required: true
+        type: string
+      mode:
+        description: "'smoke' (default) or 'bv' (build-verification / wallet flows)"
+        required: false
+        type: string
+        default: smoke
+      timeout-minutes:
+        description: "Job timeout"
+        required: false
+        type: number
+        default: 15
+      artifact-viewer-host:
+        description: "Host serving uploaded HTML reports (for the job-summary link)"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      result:
+        description: "Outcome: passed, flaky, failed, cancelled"
+        value: ${{ jobs.e2e.outputs.result }}
+      result_label:
+        description: "Human-readable outcome label"
+        value: ${{ jobs.e2e.outputs.result_label }}
+      summary:
+        description: "Counts string, e.g. '5 passed, 1 flaky'"
+        value: ${{ jobs.e2e.outputs.summary }}
+      report_artifact_id:
+        description: "Artifact ID of the uploaded Playwright HTML report"
+        value: ${{ jobs.e2e.outputs.report_artifact_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      result: ${{ steps.playwright-result.outputs.result }}
+      result_label: ${{ steps.playwright-result.outputs.result_label }}
+      summary: ${{ steps.playwright-result.outputs.summary }}
+      report_artifact_id: ${{ steps.upload-report.outputs.artifact-id }}
+    steps:
+      - name: Setup
+        uses: aragon/github-templates/steps/setup@main
+
+      - name: Get Playwright version
+        id: pw-version
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: pnpm e2e:install
+
+      - name: Install Playwright OS deps
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
+
+      - name: Warmup deployment
+        env:
+          E2E_BASE_URL: ${{ inputs.deployment-url }}
+        run: |
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$E2E_BASE_URL" || true)
+            echo "Attempt $i: HTTP $STATUS"
+            [ "$STATUS" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "::warning::Warmup did not get 200 — proceeding anyway"
+
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        env:
+          E2E_BASE_URL: ${{ inputs.deployment-url }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            smoke|bv) ;;
+            *) echo "::error::mode must be 'smoke' or 'bv', got '$MODE'"; exit 1 ;;
+          esac
+          pnpm "e2e:$MODE"
+
+      - name: Parse Playwright results
+        id: playwright-result
+        if: always()
+        uses: aragon/github-templates/steps/parse-playwright-results@main
+        with:
+          report-path: e2e/test-results/results.json
+          step-outcome: ${{ steps.tests.outcome }}
+
+      - name: Upload HTML report
+        id: upload-report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-${{ inputs.environment }}
+          path: e2e/playwright-report/
+          retention-days: 14
+
+      - name: Add report link to job summary
+        if: always()
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          RESULT_LABEL: ${{ steps.playwright-result.outputs.result_label }}
+          RESULT_SUMMARY: ${{ steps.playwright-result.outputs.summary }}
+          ARTIFACT_ID: ${{ steps.upload-report.outputs.artifact-id }}
+          ARTIFACT_VIEWER_HOST: ${{ inputs.artifact-viewer-host }}
+        run: |
+          {
+            echo "### 🎭 Playwright ${{ inputs.mode }} report"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Environment** | \`${ENVIRONMENT}\` |"
+            echo "| **Result** | ${RESULT_LABEL} |"
+            echo "| **Summary** | ${RESULT_SUMMARY} |"
+            if [ -n "$ARTIFACT_VIEWER_HOST" ]; then
+              echo "| **HTML Report** | [View report](https://${ARTIFACT_VIEWER_HOST}/${GITHUB_REPOSITORY}/${ARTIFACT_ID}/index.html) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload traces on failure
+        if: ${{ always() && steps.playwright-result.outputs.result != 'passed' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-traces-${{ inputs.environment }}
+          path: e2e/test-results/
+          retention-days: 7

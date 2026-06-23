@@ -1,0 +1,129 @@
+# Reusable Vercel deploy. The broad-permission VERCEL_TOKEN is resolved from a 1Password path
+# ONLY inside this workflow and exposed solely as an env var to the Vercel CLI — no consumer
+# workflow ever references it. This is how the release system "restricts access to Vercel":
+# the token has exactly one place it can be read, behind the caller's protected environment.
+#
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+
+name: Deploy (Vercel)
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: "Target environment (used for the GitHub environment gate + Vercel prod flag)"
+        required: true
+        type: string
+      ref:
+        description: "Branch, tag or SHA to build/deploy"
+        required: false
+        type: string
+      domain:
+        description: "If set, alias the deployment URL to this domain"
+        required: false
+        type: string
+        default: ""
+      vercel-scope:
+        description: "Vercel scope/org (e.g. aragon-app)"
+        required: true
+        type: string
+      op-vercel-token-path:
+        description: "1Password path to the Vercel token (op://vault/item/field)"
+        required: true
+        type: string
+      op-env-vault:
+        description: "Optional 1Password vault to bulk-load environment secrets into .env before build"
+        required: false
+        type: string
+        default: ""
+      setup-command:
+        description: "Optional command run before the Vercel build (e.g. 'pnpm run setup production')"
+        required: false
+        type: string
+        default: ""
+      prod:
+        description: "Force a production build/deploy. Defaults to true when env == 'production'."
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token scoped to the caller repo's vault"
+        required: true
+    outputs:
+      deploymentUrl:
+        description: "The URL of the Vercel deployment"
+        value: ${{ jobs.deploy.outputs.deploymentUrl }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    outputs:
+      deploymentUrl: ${{ steps.deploy.outputs.deploymentUrl }}
+    env:
+      VERCEL_SCOPE: ${{ inputs.vercel-scope }}
+      ENABLE_EXPERIMENTAL_COREPACK: "1"
+      PROD: ${{ (inputs.prod || inputs.env == 'production') && 'true' || 'false' }}
+    steps:
+      - name: Validate 1Password input
+        env:
+          OP_VERCEL_TOKEN_PATH: ${{ inputs.op-vercel-token-path }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$OP_VERCEL_TOKEN_PATH" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
+            echo "::error::op-vercel-token-path is not a valid op:// path" >&2
+            exit 1
+          fi
+
+      - name: Setup
+        uses: aragon/github-templates/steps/setup@main
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve Vercel token
+        id: vercel-secret
+        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          VERCEL_TOKEN: ${{ inputs.op-vercel-token-path }}
+
+      - name: Run setup command
+        if: inputs.setup-command != ''
+        run: ${{ inputs.setup-command }}
+
+      - name: Load environment secrets into .env
+        if: inputs.op-env-vault != ''
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          op-vault: ${{ inputs.op-env-vault }}
+          secret-filepath: ".env"
+          mode: alltofile
+
+      - name: Build & deploy to Vercel
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ steps.vercel-secret.outputs.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          PROD_ARG=""
+          if [ "$PROD" = "true" ]; then PROD_ARG="--prod"; fi
+          pnpm vercel build $PROD_ARG --yes --scope "$VERCEL_SCOPE"
+          SKIP_DOMAIN=""
+          if [ "$PROD" = "true" ]; then SKIP_DOMAIN="--skip-domain"; fi
+          URL="$(pnpm vercel deploy --prebuilt $PROD_ARG $SKIP_DOMAIN --yes --scope "$VERCEL_SCOPE")"
+          echo "deploymentUrl=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Alias deployment to domain
+        if: inputs.domain != ''
+        env:
+          VERCEL_TOKEN: ${{ steps.vercel-secret.outputs.VERCEL_TOKEN }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deploymentUrl }}
+          DOMAIN: ${{ inputs.domain }}
+        run: pnpm vercel alias "$DEPLOYMENT_URL" "$DOMAIN" --scope "$VERCEL_SCOPE"

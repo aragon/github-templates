@@ -1,0 +1,168 @@
+# Reusable Release — Finalize. Called by the consumer on release-PR merge. This is the ONLY place a
+# release tag + GitHub Release is created, always on the merged (tested) commit.
+#
+# The caller passes the merge SHA + PR body (for the Slack thread marker), e.g.:
+#   merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
+#   pr-body:   ${{ github.event.pull_request.body }}
+#
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+
+name: Release — Finalize
+
+on:
+  workflow_call:
+    inputs:
+      merge-sha:
+        description: "The merged commit SHA to tag"
+        required: true
+        type: string
+      pr-body:
+        description: "Release PR body (parsed for the <!-- slack_ts --> marker)"
+        required: false
+        type: string
+        default: ""
+      version:
+        description: "Version override; if empty it is read from package.json at merge-sha"
+        required: false
+        type: string
+        default: ""
+      tag-prefix:
+        description: "Tag prefix"
+        required: false
+        type: string
+        default: "v"
+      changelog-path:
+        description: "Path to CHANGELOG.md"
+        required: false
+        type: string
+        default: "./CHANGELOG.md"
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT used for tag + release creation"
+        required: true
+        type: string
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token scoped to the caller repo's vault"
+        required: true
+    outputs:
+      tag:
+        value: ${{ jobs.finalize.outputs.tag }}
+      version:
+        value: ${{ jobs.finalize.outputs.version }}
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Validate 1Password inputs
+        env:
+          PATHS: |
+            ${{ inputs.op-release-token-path }}
+            ${{ inputs.op-slack-bot-token-path }}
+            ${{ inputs.op-slack-channel-id-path }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r p; do
+            [ -z "${p// }" ] && continue
+            if ! [[ "$p" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
+              echo "::error::Invalid op:// path: $p" >&2
+              exit 1
+            fi
+          done <<< "$PATHS"
+
+      - name: Load secrets
+        id: secrets
+        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          RELEASE_TOKEN: ${{ inputs.op-release-token-path }}
+          SLACK_BOT_TOKEN: ${{ inputs.op-slack-bot-token-path }}
+          SLACK_CHANNEL_ID: ${{ inputs.op-slack-channel-id-path }}
+
+      - name: Setup
+        uses: aragon/github-templates/steps/setup@main
+        with:
+          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          ref: ${{ inputs.merge-sha }}
+          fetch-depth: "0"
+          install: "false"
+
+      - name: Resolve version & tag
+        id: resolve
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+          VERSION="$VERSION_INPUT"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Refusing to tag an invalid version: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG_PREFIX}${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract Slack thread ts
+        id: slack-ts
+        uses: aragon/github-templates/steps/extract-slack-ts@main
+        with:
+          body: ${{ inputs.pr-body }}
+
+      - name: Read changelog section
+        id: changelog
+        uses: aragon/github-templates/steps/read-changelog@main
+        with:
+          version: ${{ steps.resolve.outputs.version }}
+          path: ${{ inputs.changelog-path }}
+
+      - name: Build release notes
+        id: notes
+        uses: aragon/github-templates/steps/build-release-notes@main
+        with:
+          changes: ${{ steps.changelog.outputs.changes }}
+          slack-ts: ${{ steps.slack-ts.outputs.ts }}
+
+      - name: Ensure tag
+        uses: aragon/github-templates/steps/gh-ensure-tag@main
+        with:
+          tag: ${{ steps.resolve.outputs.tag }}
+          sha: ${{ inputs.merge-sha }}
+
+      - name: Ensure GitHub Release
+        uses: aragon/github-templates/steps/gh-ensure-release@main
+        with:
+          tag: ${{ steps.resolve.outputs.tag }}
+          title: "🚀 Release ${{ steps.resolve.outputs.tag }}"
+          notes-path: ${{ steps.notes.outputs.path }}
+          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+
+      - name: Notify Slack — released
+        if: inputs.op-slack-bot-token-path != ''
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ steps.secrets.outputs.SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ steps.secrets.outputs.SLACK_CHANNEL_ID }}
+          thread-ts: ${{ steps.slack-ts.outputs.ts }}
+          message: |
+            :label: *Tagged ${{ steps.resolve.outputs.tag }}* and published the GitHub Release.

@@ -1,0 +1,71 @@
+# Smoke test for the composite actions in this repo. Manual-dispatch only. Exercises the leaf
+# actions that need no secrets — proving they load and produce outputs — via relative ./steps/*
+# paths (valid here because this workflow runs in-repo, not via workflow_call).
+
+name: Self-test (steps)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  steps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup (install disabled — no package in this repo)
+        uses: ./steps/setup
+        with:
+          install: "false"
+
+      - name: extract-slack-ts
+        id: ets
+        uses: ./steps/extract-slack-ts
+        with:
+          body: "Some PR body\n<!-- slack_ts: 1700000000.123456 -->"
+
+      - name: assert extract-slack-ts
+        env:
+          TS: ${{ steps.ets.outputs.ts }}
+        run: |
+          set -euo pipefail
+          [ "$TS" = "1700000000.123456" ] || { echo "::error::extract-slack-ts failed: '$TS'"; exit 1; }
+
+      - name: build-release-notes
+        id: notes
+        uses: ./steps/build-release-notes
+        with:
+          changes: "- a change"
+          slack-ts: "1700000000.123456"
+
+      - name: assert build-release-notes
+        env:
+          NOTES_PATH: ${{ steps.notes.outputs.path }}
+        run: |
+          set -euo pipefail
+          grep -q "slack_ts: 1700000000.123456" "$NOTES_PATH" || { echo "::error::notes missing marker"; exit 1; }
+
+      - name: make a fake playwright report
+        run: |
+          mkdir -p e2e/test-results
+          echo '{"stats":{"expected":5,"flaky":1,"unexpected":0,"skipped":0}}' > e2e/test-results/results.json
+
+      - name: parse-playwright-results
+        id: pw
+        uses: ./steps/parse-playwright-results
+        with:
+          report-path: e2e/test-results/results.json
+          step-outcome: success
+
+      - name: assert parse-playwright-results
+        env:
+          RESULT: ${{ steps.pw.outputs.result }}
+          SUMMARY: ${{ steps.pw.outputs.summary }}
+        run: |
+          set -euo pipefail
+          [ "$RESULT" = "flaky" ] || { echo "::error::expected flaky, got '$RESULT'"; exit 1; }
+          echo "summary: $SUMMARY"
+
+      - name: generate-release-summary (git log of this repo)
+        uses: ./steps/generate-release-summary

@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Keep the third-party actions pinned inside this repo's composite actions and reusable
+  # workflows up to date. Dependabot opens bump PRs (preserving SHA pins) when new versions ship.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(actions)"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+# Consumer repos should add the same `github-actions` ecosystem block so Dependabot tracks their
+# `aragon/github-templates/...@<sha>` pins and auto-opens PRs to adopt new releases. That is how a
+# security patch here propagates quickly while every consumer stays SHA-pinned.

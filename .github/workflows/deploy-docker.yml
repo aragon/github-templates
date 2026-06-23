@@ -1,0 +1,126 @@
+# Reusable build-on-server Docker deploy over SSH. Generic transport + environment gate; the repo
+# supplies its own remote deploy command (e.g. scripts/app-deploy.sh) because that orchestration is
+# service-specific. SSH credentials are resolved from 1Password paths only inside this workflow.
+#
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+
+name: Deploy (Docker over SSH)
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: "Target environment (drives the GitHub environment gate)"
+        required: true
+        type: string
+      ref:
+        description: "Branch, tag or SHA to deploy"
+        required: false
+        type: string
+      remote-path:
+        description: "Directory on the server to sync the repo into"
+        required: false
+        type: string
+        default: "~/app"
+      deploy-command:
+        description: "Command executed on the server, inside remote-path, after sync"
+        required: true
+        type: string
+      op-ssh-key-path:
+        description: "1Password path to the SSH private key"
+        required: true
+        type: string
+      op-ssh-user-path:
+        description: "1Password path to the SSH user"
+        required: true
+        type: string
+      op-ssh-host-path:
+        description: "1Password path to the SSH host"
+        required: true
+        type: string
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token scoped to the caller repo's vault"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.repository }}-${{ inputs.env }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    steps:
+      - name: Validate 1Password inputs
+        env:
+          PATHS: |
+            ${{ inputs.op-ssh-key-path }}
+            ${{ inputs.op-ssh-user-path }}
+            ${{ inputs.op-ssh-host-path }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r p; do
+            [ -z "${p// }" ] && continue
+            if ! [[ "$p" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
+              echo "::error::Invalid op:// path: $p" >&2
+              exit 1
+            fi
+          done <<< "$PATHS"
+
+      - name: Checkout
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: Load SSH credentials
+        id: secrets
+        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          SSH_KEY: ${{ inputs.op-ssh-key-path }}
+          SSH_USER: ${{ inputs.op-ssh-user-path }}
+          SSH_HOST: ${{ inputs.op-ssh-host-path }}
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ steps.secrets.outputs.SSH_KEY }}
+          SSH_HOST: ${{ steps.secrets.outputs.SSH_HOST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync repo to server
+        env:
+          SSH_USER: ${{ steps.secrets.outputs.SSH_USER }}
+          SSH_HOST: ${{ steps.secrets.outputs.SSH_HOST }}
+          REMOTE_PATH: ${{ inputs.remote-path }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "mkdir -p ${REMOTE_PATH}"
+          rsync -az --delete --exclude '.git' -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"
+
+      - name: Run remote deploy command
+        env:
+          SSH_USER: ${{ steps.secrets.outputs.SSH_USER }}
+          SSH_HOST: ${{ steps.secrets.outputs.SSH_HOST }}
+          REMOTE_PATH: ${{ inputs.remote-path }}
+          DEPLOY_COMMAND: ${{ inputs.deploy-command }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" \
+            "cd ${REMOTE_PATH} && ${DEPLOY_COMMAND}"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

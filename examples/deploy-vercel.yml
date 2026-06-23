@@ -1,0 +1,28 @@
+# Example: deploy to Vercel (scenario A / B). The reusable workflow runs under the named GitHub
+# environment, so protection rules (required reviewers, branch allow-list) gate the deploy and the
+# VERCEL_TOKEN is only ever readable inside the module. Pin @main to a SHA in real use.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment"
+        required: true
+        default: staging
+        type: choice
+        options: [preview, development, staging, production]
+
+jobs:
+  deploy:
+    uses: aragon/github-templates/.github/workflows/deploy-vercel.yml@main
+    with:
+      env: ${{ inputs.env }}
+      vercel-scope: aragon-app
+      op-vercel-token-path: op://kv_app_infra/VERCEL_TOKEN/credential
+      op-env-vault: kv_app_${{ inputs.env }}
+      setup-command: pnpm run setup ${{ inputs.env }}
+      domain: ${{ inputs.env == 'production' && 'app.aragon.org' || '' }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

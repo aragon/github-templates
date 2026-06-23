@@ -1,0 +1,100 @@
+name: Compute Version
+description: |
+  Computes the next release version, bumps package.json, and updates CHANGELOG.md — for either
+  version engine. This is the single pluggable seam between Changesets and semantic-release; the
+  surrounding release orchestration is engine-agnostic and consumes the `version` output.
+
+  Repo-specific policies (stale-lineage guard, DB-migration detection, etc.) are intentionally NOT
+  here — keep them in the caller's thin wrapper so this action stays small.
+
+  Leaves the working tree modified (package.json + CHANGELOG.md). It does NOT commit, branch, tag or push.
+
+inputs:
+  engine:
+    description: "Version engine: 'changesets' or 'semantic-release'"
+    required: true
+  base-branch:
+    description: "Base branch for the semantic-release dry-run (semantic-release engine only)"
+    required: false
+    default: "main"
+  prettier-changelog:
+    description: "Format CHANGELOG.md with prettier after bumping (changesets engine only)"
+    required: false
+    default: "true"
+  github-token:
+    description: "GitHub token (used by both engines for changelog/commit-analysis API calls)"
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: "The resulting package version (e.g. 1.2.3); empty if nothing to release"
+    value: ${{ steps.compute.outputs.version }}
+  released:
+    description: "'true' when a new version was produced, 'false' otherwise"
+    value: ${{ steps.compute.outputs.released }}
+
+runs:
+  using: composite
+  steps:
+    - id: compute
+      shell: bash
+      env:
+        ENGINE: ${{ inputs.engine }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        PRETTIER_CHANGELOG: ${{ inputs.prettier-changelog }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        case "$ENGINE" in
+          changesets)
+            # Changesets bumps package.json + CHANGELOG.md from accumulated .changeset/*.md files.
+            # No-op (idempotent) when there are no pending changesets.
+            BEFORE="$(node -p "require('./package.json').version")"
+            pnpm changeset version
+            VERSION="$(node -p "require('./package.json').version")"
+            if [ "$PRETTIER_CHANGELOG" = "true" ] && [ -f CHANGELOG.md ]; then
+              pnpm dlx prettier --write --prose-wrap never CHANGELOG.md
+            fi
+            if [ "$VERSION" = "$BEFORE" ]; then
+              echo "No pending changesets — version unchanged ($VERSION)."
+              echo "version=" >> "$GITHUB_OUTPUT"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            ;;
+
+          semantic-release)
+            # Compute the next version from conventional commits via a dry-run, then bump manually.
+            # --branches override lets the dry-run baseline on the requested base branch.
+            # NOTE: re-validate this log parse on every semantic-release major upgrade — the
+            # "next release version is X.Y.Z" line format can change across versions.
+            if ! [[ "$BASE_BRANCH" =~ ^[A-Za-z0-9._/-]{1,255}$ ]]; then
+              echo "::error::Refusing unsafe base-branch: $BASE_BRANCH" >&2
+              exit 1
+            fi
+            pnpm exec semantic-release --dry-run --branches "$BASE_BRANCH" > "$RUNNER_TEMP/sr.log" 2>&1 || true
+            VERSION=$(grep -oiE 'next release version is [0-9]+\.[0-9]+\.[0-9]+' "$RUNNER_TEMP/sr.log" \
+              | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+            if [ -z "$VERSION" ]; then
+              echo "No releasable commits (or output format changed) — nothing to release." >&2
+              tail -n 50 "$RUNNER_TEMP/sr.log" >&2 || true
+              echo "version=" >> "$GITHUB_OUTPUT"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            pnpm version "$VERSION" --no-git-tag-version --allow-same-version
+            # conventionalcommits preset; prepend the newest section (version from package.json).
+            pnpm dlx conventional-changelog-cli -p conventionalcommits -i CHANGELOG.md -s -r 1
+            ;;
+
+          *)
+            echo "::error::Unknown engine '$ENGINE' (expected 'changesets' or 'semantic-release')" >&2
+            exit 1
+            ;;
+        esac
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "released=true" >> "$GITHUB_OUTPUT"
+        echo "✅ Next version: $VERSION"
