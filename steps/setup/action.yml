@@ -17,6 +17,14 @@ inputs:
   ref:
     description: "The branch, tag or SHA to checkout."
     required: false
+  allow-unsafe-pr-checkout:
+    description: |
+      Pass-through to actions/checkout's `allow-unsafe-pr-checkout`. Only set this to "true" if the
+      caller's own workflow is triggered by `pull_request_target` or `workflow_run`, intentionally
+      checks out fork PR code via `ref`, and has reviewed the risk at https://gh.io/securely-using-pull_request_target.
+      Defaults to "false" (actions/checkout's own default), which is safe for every other trigger.
+    required: false
+    default: "false"
   registry-url:
     description: |
       URL of the registry used for Node setup. Left EMPTY by default so it does not write an .npmrc
@@ -45,15 +53,16 @@ runs:
   using: "composite"
   steps:
     - name: Checkout repository
-      uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: ${{ inputs.repository }}
         fetch-depth: ${{ inputs.fetch-depth }}
         token: ${{ inputs.token }}
         ref: ${{ inputs.ref }}
+        allow-unsafe-pr-checkout: ${{ inputs.allow-unsafe-pr-checkout }}
 
     - name: Install pnpm
-      uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
+      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       with:
         run_install: false
 
@@ -62,7 +71,7 @@ runs:
       run: corepack enable
 
     - name: Setup Node
-      uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
         node-version-file: ${{ inputs.node-version-file }}

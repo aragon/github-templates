@@ -92,49 +92,33 @@ jobs:
       pr-url: ${{ steps.pr.outputs.url }}
       pr-number: ${{ steps.pr.outputs.number }}
     steps:
-      - name: Validate 1Password inputs
-        env:
-          PATHS: |
-            ${{ inputs.op-release-token-path }}
-            ${{ inputs.op-gpg-key-path }}
-            ${{ inputs.op-gpg-passphrase-path }}
-            ${{ inputs.op-slack-bot-token-path }}
-            ${{ inputs.op-slack-channel-id-path }}
-            ${{ inputs.op-linear-token-path }}
-        run: |
-          set -euo pipefail
-          while IFS= read -r p; do
-            [ -z "${p// }" ] && continue
-            if ! [[ "$p" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
-              echo "::error::Invalid op:// path: $p" >&2
-              exit 1
-            fi
-          done <<< "$PATHS"
-
-      - name: Load secrets
-        id: secrets
-        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
+      # Every op-*-path input is resolved here, in one place — see steps/credential-retrieval.
+      # Optional paths (gpg/slack/linear) are passed through as-is; an empty one just resolves to
+      # an empty string below instead of failing.
+      - name: Resolve 1Password secrets
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
         with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          RELEASE_TOKEN: ${{ inputs.op-release-token-path }}
-          GPG_PRIVATE_KEY: ${{ inputs.op-gpg-key-path }}
-          GPG_PASSPHRASE: ${{ inputs.op-gpg-passphrase-path }}
-          SLACK_BOT_TOKEN: ${{ inputs.op-slack-bot-token-path }}
-          SLACK_CHANNEL_ID: ${{ inputs.op-slack-channel-id-path }}
-          LINEAR_API_TOKEN: ${{ inputs.op-linear-token-path }}
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            RELEASE_TOKEN=${{ inputs.op-release-token-path }}
+            GPG_PRIVATE_KEY=${{ inputs.op-gpg-key-path }}
+            GPG_PASSPHRASE=${{ inputs.op-gpg-passphrase-path }}
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+            LINEAR_API_TOKEN=${{ inputs.op-linear-token-path }}
 
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
         with:
-          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
           ref: ${{ inputs.base-ref }}
           fetch-depth: "0"
 
       - name: Guard — only one active release
         env:
-          GH_TOKEN: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
           TARGET_BRANCH: ${{ inputs.target-branch }}
           PREFIX: ${{ inputs.release-branch-prefix }}
         run: |
@@ -150,8 +134,8 @@ jobs:
         if: inputs.op-gpg-key-path != ''
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
-          gpg_private_key: ${{ steps.secrets.outputs.GPG_PRIVATE_KEY }}
-          passphrase: ${{ steps.secrets.outputs.GPG_PASSPHRASE }}
+          gpg_private_key: ${{ fromJSON(steps.op.outputs.secrets).GPG_PRIVATE_KEY }}
+          passphrase: ${{ fromJSON(steps.op.outputs.secrets).GPG_PASSPHRASE }}
           git_user_signingkey: true
           git_commit_gpgsign: true
 
@@ -161,7 +145,7 @@ jobs:
         with:
           engine: ${{ inputs.engine }}
           base-branch: ${{ inputs.base-ref }}
-          github-token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          github-token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
       - name: Nothing to release
         if: steps.version.outputs.released != 'true'
@@ -184,7 +168,7 @@ jobs:
         if: steps.version.outputs.released == 'true'
         uses: aragon/github-templates/steps/generate-release-summary@main
         with:
-          linear-api-token: ${{ steps.secrets.outputs.LINEAR_API_TOKEN }}
+          linear-api-token: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_API_TOKEN }}
 
       - name: Commit & push
         if: steps.version.outputs.released == 'true'
@@ -207,15 +191,15 @@ jobs:
           head: ${{ steps.branch.outputs.name }}
           title: "Release v${{ steps.version.outputs.version }}"
           body: ${{ steps.summary.outputs.summary }}
-          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
       - name: Notify Slack — release started
         id: slack
         if: ${{ steps.version.outputs.released == 'true' && inputs.op-slack-bot-token-path != '' }}
         uses: aragon/github-templates/steps/slack-notify@main
         with:
-          slack-bot-token: ${{ steps.secrets.outputs.SLACK_BOT_TOKEN }}
-          slack-channel-id: ${{ steps.secrets.outputs.SLACK_CHANNEL_ID }}
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           message: |
             :rocket: *Release v${{ steps.version.outputs.version }} started*
             *PR:* ${{ steps.pr.outputs.url }}
@@ -224,7 +208,7 @@ jobs:
       - name: Persist Slack thread marker on PR
         if: ${{ steps.slack.outputs.ts != '' }}
         env:
-          GH_TOKEN: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           SLACK_TS: ${{ steps.slack.outputs.ts }}
         run: |

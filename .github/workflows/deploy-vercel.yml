@@ -1,7 +1,8 @@
-# Reusable Vercel deploy. The broad-permission VERCEL_TOKEN is resolved from a 1Password path
-# ONLY inside this workflow and exposed solely as an env var to the Vercel CLI — no consumer
-# workflow ever references it. This is how the release system "restricts access to Vercel":
-# the token has exactly one place it can be read, behind the caller's protected environment.
+# Reusable Vercel deploy. The broad-permission Vercel credentials (VERCEL_TOKEN, VERCEL_ORG_ID,
+# VERCEL_PROJECT_ID) are resolved from one 1Password vault ONLY inside this workflow and exposed
+# solely as env vars to the Vercel CLI — no consumer workflow ever references them. This is how
+# the release system "restricts access to Vercel": the credentials have exactly one place they
+# can be read, behind the caller's protected environment.
 #
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
 
@@ -27,8 +28,11 @@ on:
         description: "Vercel scope/org (e.g. aragon-app)"
         required: true
         type: string
-      op-vercel-token-path:
-        description: "1Password path to the Vercel token (op://vault/item/field)"
+      op-infra-vault:
+        description: |
+          1Password vault holding the Vercel credentials. Expects three items in that vault, named
+          exactly VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID, each with a `credential`
+          field (e.g. op://kv_app_infra/VERCEL_PROJECT_ID/credential).
         required: true
         type: string
       op-env-vault:
@@ -69,29 +73,24 @@ jobs:
       ENABLE_EXPERIMENTAL_COREPACK: "1"
       PROD: ${{ (inputs.prod || inputs.env == 'production') && 'true' || 'false' }}
     steps:
-      - name: Validate 1Password input
-        env:
-          OP_VERCEL_TOKEN_PATH: ${{ inputs.op-vercel-token-path }}
-        run: |
-          set -euo pipefail
-          if ! [[ "$OP_VERCEL_TOKEN_PATH" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
-            echo "::error::op-vercel-token-path is not a valid op:// path" >&2
-            exit 1
-          fi
+      # The only 1Password call in this workflow — see steps/credential-retrieval. Op:// format
+      # validation now lives there too, so this no longer needs its own copy of that regex. All
+      # three Vercel credentials come from the same vault, one item per name (see op-infra-vault).
+      - name: Resolve Vercel credentials
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            VERCEL_TOKEN=op://${{ inputs.op-infra-vault }}/VERCEL_TOKEN/credential
+            VERCEL_ORG_ID=op://${{ inputs.op-infra-vault }}/VERCEL_ORG_ID/credential
+            VERCEL_PROJECT_ID=op://${{ inputs.op-infra-vault }}/VERCEL_PROJECT_ID/credential
 
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
         with:
           ref: ${{ inputs.ref }}
-
-      - name: Resolve Vercel token
-        id: vercel-secret
-        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
-        with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          VERCEL_TOKEN: ${{ inputs.op-vercel-token-path }}
 
       - name: Run setup command
         if: inputs.setup-command != ''
@@ -109,7 +108,9 @@ jobs:
       - name: Build & deploy to Vercel
         id: deploy
         env:
-          VERCEL_TOKEN: ${{ steps.vercel-secret.outputs.VERCEL_TOKEN }}
+          VERCEL_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_PROJECT_ID }}
         run: |
           set -euo pipefail
           PROD_ARG=""
@@ -123,7 +124,9 @@ jobs:
       - name: Alias deployment to domain
         if: inputs.domain != ''
         env:
-          VERCEL_TOKEN: ${{ steps.vercel-secret.outputs.VERCEL_TOKEN }}
+          VERCEL_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_PROJECT_ID }}
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.deploymentUrl }}
           DOMAIN: ${{ inputs.domain }}
         run: pnpm vercel alias "$DEPLOYMENT_URL" "$DOMAIN" --scope "$VERCEL_SCOPE"

@@ -1,33 +1,48 @@
+# The ONLY place in this repo that talks to 1Password. Every other composite action and reusable
+# workflow that needs a secret calls this action instead of installing the CLI or invoking a
+# 1Password action directly — that is what "centralized" means here: one action owns the CLI
+# install, the `op` invocations, output masking, and `op://` reference validation.
+#
+# Pick a mode:
+#   - byref:     resolve a short list of NAMED secrets, each from its own `op://vault/item/field`
+#                reference. This is the mode almost every consumer wants (a GitHub PAT, a Slack
+#                token, an SSH key, ...) and replaces calling `1password/load-secrets-action`
+#                directly. Outputs a single JSON blob (see `outputs.secrets` below) so secret
+#                values never touch $GITHUB_ENV / the process environment of later steps — only
+#                the step(s) that explicitly read a field via fromJSON() see it.
+#   - alltoenv:  bulk-load every "API Credential" item in one vault as MASKED env vars (var name =
+#                item title). Broad, job-wide exposure by design — only use for genuinely bulk
+#                secret needs (e.g. materialising a full app .env).
+#   - alltofile: same bulk load as alltoenv, appended to a file instead of $GITHUB_ENV.
 name: "Credential Retrieval"
-description: "Retrieve credentials from a password manager"
+description: "Single entry point for every 1Password interaction: bulk vault -> env/file, or named op:// references -> a JSON output."
 
 inputs:
   mode:
     description: |
-      Mode to use the credential retrieval library:
-      - alltoenv: Loads all credentials in the 1Password vault and sets them as MASKED GitHub environment variables.
-      - alltofile: Loads all credentials in the 1Password vault and stores them in a specified file.
-        Options:
-          - secret-filepath
-          - file-format
+      - byref:     resolve named `op://` references passed in `secret-refs` (see that input for the
+        format). Use this instead of calling `1password/load-secrets-action` directly.
+      - alltoenv:  load every item in `op-vault` and set them as MASKED GitHub env vars.
+      - alltofile: load every item in `op-vault` and append them to `secret-filepath`.
     required: false
     type: choice
     default: "alltoenv"
     options:
       - alltoenv
       - alltofile
+      - byref
 
   secret-filepath:
     description: |
-      Specifies the filepath where secrets will be downloaded.
-      Secrets will be appended to the end of the file.
+      'alltofile' only. Filepath where secrets will be downloaded. Secrets are appended to the end
+      of the file.
     required: false
     type: string
     default: ".env"
 
   file-format:
     description: |
-      Specifies the format of the configuration file.
+      'alltofile' only. Format of the output file.
       - env: Uses the format VARNAME=VARVALUE
     required: false
     type: choice
@@ -37,71 +52,223 @@ inputs:
 
   # OP values
   op-token:
-    description: "1Password token for the service account"
+    description: "1Password service account token. Always required — every mode authenticates the CLI with it."
     required: true
     type: string
 
   op-vault:
-    description: "1Password vault to search for all credentials"
-    required: true
+    description: "1Password vault to bulk-load from. Required for 'alltoenv' / 'alltofile'; unused by 'byref' (each entry in secret-refs carries its own vault)."
+    required: false
     type: string
+    default: ""
+
+  secret-refs:
+    description: |
+      'byref' only. Newline-separated `NAME=op://vault/item/field` pairs, one per secret, e.g.:
+
+        secret-refs: |
+          RELEASE_TOKEN=op://kv_app_infra/ARABOT_PAT/credential
+          SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+
+      NAME must match [A-Za-z_][A-Za-z0-9_]*. A line whose ref side is empty (e.g. `SLACK_BOT_TOKEN=`)
+      is treated as "optional secret not configured" and resolves to an empty string instead of
+      failing — this lets callers wire through optional op-*-path inputs unconditionally. A line
+      with no '=' at all is a malformed entry and fails the step (this is NOT the same as an empty
+      ref — it usually means a caller forgot to append `=${{ inputs.op-foo-path }}`).
+    required: false
+    type: string
+    default: ""
+
+outputs:
+  secrets:
+    description: |
+      'byref' only. JSON object mapping each NAME from `secret-refs` to its resolved value; always
+      valid JSON — '{}' for any other mode (or when secret-refs is empty), so fromJSON() is always
+      safe to call unconditionally. Read a field with fromJSON(), e.g.:
+        ${{ fromJSON(steps.<id>.outputs.secrets).RELEASE_TOKEN }}
+    value: ${{ steps.byref.outputs.secrets || '{}' }}
 
 runs:
   using: "composite"
   steps:
-    - name: Install 1Password CLI
-      uses: 1password/install-cli-action@a5215d3a7f75c1629216c465ea9ab3ab399c4b71 #v4.0.0
-
-    - name: List All Items in the Vault
+    - name: Validate inputs
       env:
-        OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
+        MODE: ${{ inputs.mode }}
+        OP_VAULT: ${{ inputs.op-vault }}
       shell: bash
       run: |
-        echo "Retrieving a list of all credential names in the vault ${{ inputs.op-vault }}"
-        op item list --vault ${{ inputs.op-vault }} --categories 'API Credential' --format json > op_list.json
+        set -euo pipefail
+        case "$MODE" in
+          alltoenv|alltofile|byref) ;;
+          *)
+            echo "::error::Unknown mode '$MODE' (expected alltoenv, alltofile, or byref)" >&2
+            exit 1
+            ;;
+        esac
+        if [[ "$MODE" == "alltoenv" || "$MODE" == "alltofile" ]] && [[ -z "$OP_VAULT" ]]; then
+          echo "::error::op-vault is required for mode '$MODE'" >&2
+          exit 1
+        fi
 
-    - name: "Download All Vault Secrets and Set Them as envvars"
+    - name: Install 1Password CLI
+      uses: 1password/install-cli-action@a5215d3a7f75c1629216c465ea9ab3ab399c4b71 # v4.0.0
+
+    - name: List all items in the vault
+      if: ${{ inputs.mode == 'alltoenv' || inputs.mode == 'alltofile' }}
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-token }}
+        OP_VAULT: ${{ inputs.op-vault }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Retrieving a list of all credential names in the vault $OP_VAULT"
+        op item list --vault "$OP_VAULT" --categories 'API Credential' --format json > op_list.json
+
+    - name: "Download all vault secrets and set them as env vars"
       if: ${{ inputs.mode == 'alltoenv' }}
       env:
-        OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-token }}
+        OP_VAULT: ${{ inputs.op-vault }}
       shell: bash
       run: |
-        # Download ALL vault secrets and SET THEM AS VARS
-        # Extracts number of items
-        if [[ -f op_list.json ]];then
+        set -euo pipefail
+        # ::add-mask:: only masks the exact line it's given — a value with embedded newlines (a
+        # multi-line credential) needs one call per line, or every line after the first leaks in
+        # cleartext in the job log.
+        mask_multiline() {
+          local val="$1" line
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -n "$line" ]] && echo "::add-mask::$line"
+          done <<< "$val"
+        }
+        number_entries=0
+        if [[ -f op_list.json ]]; then
           number_entries=$(jq length op_list.json)
         fi
-        for((i=0; i<number_entries; i++)); do
-          # Extract values from each item using jq
+        for ((i = 0; i < number_entries; i++)); do
           item_name=$(jq -r ".[$i].title" op_list.json)
-          item_credential=$(op read "op://${{ inputs.op-vault }}/${item_name}/credential")
-          echo "::add-mask::$item_credential"
-          echo "${item_name}=${item_credential}" >> $GITHUB_ENV
+          # Item titles become env-var names. Skip anything that isn't a valid identifier instead
+          # of writing a malformed (or, if a title ever contained embedded newlines, spoofed) entry
+          # to $GITHUB_ENV. Newlines are escaped (not left raw) before logging the warning, so a
+          # title crafted to smuggle a second `::workflow-command::` line can't do so here either.
+          if ! [[ "$item_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            safe_name="${item_name//$'\n'/\\n}"
+            echo "::warning::Skipping vault item '${safe_name}' — not a valid env var name"
+            continue
+          fi
+          item_credential=$(op read "op://${OP_VAULT}/${item_name}/credential")
+          mask_multiline "$item_credential"
+          # Multiline-safe $GITHUB_ENV form (GitHub's own delimiter syntax) — required so a
+          # credential value with an embedded newline can't inject an unrelated extra env var.
+          delim="ghaenv_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          {
+            echo "${item_name}<<$delim"
+            echo "$item_credential"
+            echo "$delim"
+          } >> "$GITHUB_ENV"
         done
-        rm op_list.json
+        rm -f op_list.json
 
-    - name: "Download All Vault Secrets and Store Them in File ${{ inputs.secret-filepath }}"
+    - name: "Download all vault secrets and store them in a file"
       if: ${{ inputs.mode == 'alltofile' }}
       env:
-        OP_SERVICE_ACCOUNT_TOKEN: "${{ inputs.op-token }}"
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-token }}
+        OP_VAULT: ${{ inputs.op-vault }}
+        FILE_FORMAT: ${{ inputs.file-format }}
+        SECRET_FILEPATH: ${{ inputs.secret-filepath }}
       shell: bash
       run: |
-        # Download ALL vault secrets and STORE THEM IN FILE ${{ inputs.secret-filepath }}
-        # Extracts number of items
-        if [[ -f op_list.json ]];then
+        set -euo pipefail
+        mask_multiline() {
+          local val="$1" line
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -n "$line" ]] && echo "::add-mask::$line"
+          done <<< "$val"
+        }
+        number_entries=0
+        if [[ -f op_list.json ]]; then
           number_entries=$(jq length op_list.json)
         fi
-        for ((i=0; i<number_entries; i++)); do
+        for ((i = 0; i < number_entries; i++)); do
           item_name=$(jq -r ".[$i].title" op_list.json)
-          item_credential=$(op read "op://${{ inputs.op-vault }}/${item_name}/credential")
-          case "${{ inputs.file-format }}" in
-            "env")
-              echo "${item_name}=${item_credential}" >> "${{ inputs.secret-filepath }}"
+          if ! [[ "$item_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            safe_name="${item_name//$'\n'/\\n}"
+            echo "::warning::Skipping vault item '${safe_name}' — not a valid env var name"
+            continue
+          fi
+          item_credential=$(op read "op://${OP_VAULT}/${item_name}/credential")
+          mask_multiline "$item_credential"
+          case "$FILE_FORMAT" in
+            env)
+              # The flat VARNAME=VARVALUE format has no standard escaping for embedded newlines —
+              # rather than silently writing a line that corrupts the next entry when this file is
+              # later parsed, skip it (same policy as an invalid item name).
+              if [[ "$item_credential" == *$'\n'* ]]; then
+                echo "::warning::Skipping vault item '${item_name}' — credential contains embedded newlines, unsafe for the flat env file format"
+                continue
+              fi
+              echo "${item_name}=${item_credential}" >> "$SECRET_FILEPATH"
               ;;
             *)
-              echo "Unsupported output format: ${{ inputs.file-format }}"
+              echo "::error::Unsupported file-format: $FILE_FORMAT" >&2
               exit 1
               ;;
           esac
         done
-        rm op_list.json
+        rm -f op_list.json
+
+    - name: "Resolve named 1Password references"
+      id: byref
+      if: ${{ inputs.mode == 'byref' }}
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-token }}
+        SECRET_REFS: ${{ inputs.secret-refs }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        mask_multiline() {
+          local val="$1" line
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -n "$line" ]] && echo "::add-mask::$line"
+          done <<< "$val"
+        }
+        # Same op:// shape the reusable workflows used to each validate separately — centralized
+        # here now, so they no longer carry their own copy of this regex.
+        NAME_RE='^[A-Za-z_][A-Za-z0-9_]*$'
+        REF_RE='^op://[A-Za-z0-9 ._-]+/[A-Za-z0-9 ._-]+/[A-Za-z0-9 ._-]+$'
+        json='{}'
+        while IFS= read -r line; do
+          line="${line%$'\r'}"
+          [[ -z "${line// /}" ]] && continue
+          if [[ "$line" != *"="* ]]; then
+            echo "::error::Malformed secret-refs entry (expected NAME=op://... or NAME=): '$line'" >&2
+            exit 1
+          fi
+          name="${line%%=*}"
+          ref="${line#*=}"
+          if ! [[ "$name" =~ $NAME_RE ]]; then
+            echo "::error::Invalid secret name '$name' in secret-refs (must match [A-Za-z_][A-Za-z0-9_]*)" >&2
+            exit 1
+          fi
+          if [[ -z "$ref" ]]; then
+            # Optional secret left unset by the caller — resolve to empty, not an error.
+            json=$(jq -c --arg k "$name" --arg v "" '. + {($k): $v}' <<< "$json")
+            continue
+          fi
+          if ! [[ "$ref" =~ $REF_RE ]]; then
+            echo "::error::secret-refs: '$name' is not a valid op:// reference" >&2
+            exit 1
+          fi
+          value="$(op read "$ref")"
+          mask_multiline "$value"
+          json=$(jq -c --arg k "$name" --arg v "$value" '. + {($k): $v}' <<< "$json")
+        done <<< "$SECRET_REFS"
+
+        # Random delimiter for the multiline GITHUB_OUTPUT write — a secret value that happened to
+        # contain a fixed delimiter string could otherwise inject extra output keys.
+        delim="ghadelim_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        {
+          echo "secrets<<$delim"
+          echo "$json"
+          echo "$delim"
+        } >> "$GITHUB_OUTPUT"

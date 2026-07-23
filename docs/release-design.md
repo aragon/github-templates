@@ -96,19 +96,28 @@ hooks, to keep module inputs small):
 
 ## 4. Credential model
 
-Decision: **explicit paths**. Each consumer repo knows its own `op://vault/item/field` paths and passes
-them into the shared workflow as inputs; the shared job resolves them centrally. No vault layout is
-hardcoded in the modules.
+Decision: **explicit paths**, with one exception (Vercel, below). Each consumer repo knows its own
+`op://vault/item/field` paths and passes them into the shared workflow as inputs; the shared job
+resolves them centrally. No vault layout is hardcoded in the modules.
 
 - **Isolation boundary:** each repo has its own `OP_SERVICE_ACCOUNT_TOKEN`, scoped in 1Password to that
   repo's vault only (`kv_app_infra`, `kv_backend2_infra`, `kv_gov-ui-kit_infra`, …). A bad/forged path
   can't reach another project's vault.
-- **Vercel is just another path.** `VERCEL_TOKEN` is referenced **only** inside `deploy-vercel.yml` and
-  only ever resolved there from an `op://` input — no consumer workflow YAML touches it. That is how this
-  design "restricts access to Vercel": the broad-permission token has exactly one place it can be read.
-- Two existing resolution mechanisms coexist: `steps/credential-retrieval` (bulk vault → env/file, used
-  for `.env` materialisation) and `1password/load-secrets-action` (named `op://` paths for individual
-  secrets). The modules use the granular path form for release/deploy secrets.
+- **Vercel is a vault, not a single path.** `deploy-vercel.yml` takes one input, `op-infra-vault`, and
+  resolves all three Vercel credentials it needs (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`)
+  from three same-named items in that vault — a small, deliberate exception to the "explicit paths"
+  rule because these three always travel together per Vercel project/environment. They are referenced
+  **only** inside `deploy-vercel.yml` — no consumer workflow YAML touches them. That is how this design
+  "restricts access to Vercel": the broad-permission credentials have exactly one place they can be read.
+- **One resolution mechanism, two access patterns, both inside `steps/credential-retrieval`** — the
+  only module in this repo that installs the 1Password CLI or calls `op`:
+  - `mode: alltoenv` / `alltofile` — bulk-load every item in one vault (used for `.env` materialisation).
+  - `mode: byref` — resolve a short list of named `op://` references into a JSON output (used for
+    release/deploy secrets: GitHub PAT, GPG key, Slack token, Vercel token, SSH key, …). This replaces
+    calling `1password/load-secrets-action` directly, which every reusable workflow used to do
+    independently (each with its own copy of the `op://` validation regex). Values stay out of
+    `$GITHUB_ENV` — a step reads a field explicitly with `fromJSON(steps.<id>.outputs.secrets).NAME`, so
+    only steps that ask for a given secret see it.
 
 ---
 
@@ -133,9 +142,10 @@ hardcoded in the modules.
 - **Consumers pin to a full commit SHA** (with a `# vX.Y.Z` comment) and rely on **Dependabot**
   (`github-actions` ecosystem) to auto-open bump PRs. This keeps the supply chain pinned while still
   propagating security patches quickly — merge the Dependabot PR and the fix lands.
-- This module drop is **additive**: it does not touch `steps/credential-retrieval`, so existing `@v0.4`
-  SHA pins in app / app-backend / gov-ui-kit keep working unchanged. New tag: **`v0.5`**, with `v1`
-  introduced once the modules stabilise.
+- This module drop is **additive** to `steps/credential-retrieval`: the existing `alltoenv` / `alltofile`
+  bulk-load behavior is unchanged, so `@v0.4` SHA pins in app / app-backend / gov-ui-kit keep working.
+  What's new is `mode: byref` (§4), consumed only by the reusable workflows in this same PR. New tag:
+  **`v0.5`**, with `v1` introduced once the modules stabilise.
 
 ---
 
@@ -156,7 +166,7 @@ versus the per-repo originals, which assumed the script lived in the same checko
 ### `steps/` — composite actions
 | Module | Purpose | Key inputs → outputs |
 |---|---|---|
-| `credential-retrieval` *(existing)* | bulk 1Password vault → env/file | `op-token`, `op-vault`, `mode` |
+| `credential-retrieval` *(existing, extended)* | the only module that talks to 1Password: bulk vault → env/file, or named `op://` refs → JSON | `op-token`, `mode`, `op-vault` (bulk modes), `secret-refs` (`byref`) → `secrets` (JSON, `byref`) |
 | `setup` | checkout + pnpm + Node + install | `ref`, `node-version`, `registry-url` |
 | `compute-version` | next version + bump + changelog | `engine`, `prettier-changelog` → `version` |
 | `generate-release-summary` | git-log → categorised summary (+Linear) | `linear-api-token`, `base-ref`, `repo` → `summary` |

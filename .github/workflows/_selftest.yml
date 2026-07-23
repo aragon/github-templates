@@ -69,3 +69,108 @@ jobs:
 
       - name: generate-release-summary (git log of this repo)
         uses: ./steps/generate-release-summary
+
+      # credential-retrieval is the only action that talks to 1Password, so it needs a real
+      # OP_SERVICE_ACCOUNT_TOKEN to exercise the happy path (out of scope for this secret-free
+      # self-test — see the module's own description). The cases below don't need one: they either
+      # fail during input validation (before any `op` call) or, for the "optional secret" case,
+      # never call `op` at all, so a placeholder token is enough.
+
+      - name: credential-retrieval — reject unknown mode
+        id: cr-bad-mode
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: not-a-real-mode
+          op-token: "placeholder"
+
+      - name: assert unknown mode is rejected
+        env:
+          OUTCOME: ${{ steps.cr-bad-mode.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject missing op-vault (alltoenv)
+        id: cr-missing-vault
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: alltoenv
+          op-token: "placeholder"
+          op-vault: ""
+
+      - name: assert missing op-vault is rejected
+        env:
+          OUTCOME: ${{ steps.cr-missing-vault.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject malformed secret-refs entry (missing '=')
+        id: cr-malformed
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            THIS_LINE_HAS_NO_EQUALS_SIGN
+
+      - name: assert malformed secret-refs entry is rejected
+        env:
+          OUTCOME: ${{ steps.cr-malformed.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject invalid secret name (byref)
+        id: cr-bad-name
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            1INVALID=op://vault/item/field
+
+      - name: assert invalid secret name is rejected
+        env:
+          OUTCOME: ${{ steps.cr-bad-name.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject invalid op:// reference (byref)
+        id: cr-bad-ref
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            SOME_TOKEN=not-an-op-reference
+
+      - name: assert invalid op:// reference is rejected
+        env:
+          OUTCOME: ${{ steps.cr-bad-ref.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — optional (empty) secret resolves without error
+        id: cr-optional
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            OPTIONAL_TOKEN=
+
+      - name: assert optional secret resolves to an empty string
+        env:
+          SECRETS_JSON: ${{ steps.cr-optional.outputs.secrets }}
+        run: |
+          set -euo pipefail
+          VALUE="$(jq -r '.OPTIONAL_TOKEN' <<< "$SECRETS_JSON")"
+          [ "$VALUE" = "" ] || { echo "::error::expected empty string, got '$VALUE'"; exit 1; }

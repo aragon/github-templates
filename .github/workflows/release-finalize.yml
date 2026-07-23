@@ -70,37 +70,22 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - name: Validate 1Password inputs
-        env:
-          PATHS: |
-            ${{ inputs.op-release-token-path }}
-            ${{ inputs.op-slack-bot-token-path }}
-            ${{ inputs.op-slack-channel-id-path }}
-        run: |
-          set -euo pipefail
-          while IFS= read -r p; do
-            [ -z "${p// }" ] && continue
-            if ! [[ "$p" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
-              echo "::error::Invalid op:// path: $p" >&2
-              exit 1
-            fi
-          done <<< "$PATHS"
-
-      - name: Load secrets
-        id: secrets
-        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
+      # Every op-*-path input is resolved here, in one place — see steps/credential-retrieval.
+      - name: Resolve 1Password secrets
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
         with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          RELEASE_TOKEN: ${{ inputs.op-release-token-path }}
-          SLACK_BOT_TOKEN: ${{ inputs.op-slack-bot-token-path }}
-          SLACK_CHANNEL_ID: ${{ inputs.op-slack-channel-id-path }}
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            RELEASE_TOKEN=${{ inputs.op-release-token-path }}
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
 
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
         with:
-          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
           ref: ${{ inputs.merge-sha }}
           fetch-depth: "0"
           install: "false"
@@ -155,14 +140,14 @@ jobs:
           tag: ${{ steps.resolve.outputs.tag }}
           title: "🚀 Release ${{ steps.resolve.outputs.tag }}"
           notes-path: ${{ steps.notes.outputs.path }}
-          token: ${{ steps.secrets.outputs.RELEASE_TOKEN }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
       - name: Notify Slack — released
         if: inputs.op-slack-bot-token-path != ''
         uses: aragon/github-templates/steps/slack-notify@main
         with:
-          slack-bot-token: ${{ steps.secrets.outputs.SLACK_BOT_TOKEN }}
-          slack-channel-id: ${{ steps.secrets.outputs.SLACK_CHANNEL_ID }}
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           thread-ts: ${{ steps.slack-ts.outputs.ts }}
           message: |
             :label: *Tagged ${{ steps.resolve.outputs.tag }}* and published the GitHub Release.

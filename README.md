@@ -16,7 +16,7 @@ centralise secret handling, restrict access to sensitive tokens (e.g. Vercel), a
 
 | Action | Purpose |
 |--------|---------|
-| `credential-retrieval` | bulk-load a 1Password vault into env vars or a file |
+| `credential-retrieval` | the only place this repo talks to 1Password: bulk-load a vault into env vars/a file, or resolve named `op://` references (`mode: byref`) |
 | `setup` | checkout + pnpm + Node + install |
 | `compute-version` | next version + bump + CHANGELOG — engine: `changesets` or `semantic-release` |
 | `generate-release-summary` | git-log → categorised summary (optional Linear enrichment) |
@@ -64,9 +64,13 @@ jobs:
 
 ## Versioning
 
-Semver tags `vX.Y.Z` + a moving major `vX`, cut by `release-self.yml`. This is **additive** to the
-existing `credential-retrieval@v0.4`, which is unchanged. Consumers pin SHAs and adopt new releases via
-Dependabot.
+Semver tags `vX.Y.Z` + a moving major `vX`, cut by `release-self.yml`. Consumers pin SHAs and adopt
+new releases via Dependabot.
+
+`credential-retrieval` gained an additive `mode: byref` (named `op://` references, JSON output) that
+every reusable workflow now uses instead of calling `1password/load-secrets-action` directly — see
+[`docs/release-design.md §4`](docs/release-design.md#4-credential-model). Existing `alltoenv` /
+`alltofile` behavior for consumers pinned to an older SHA is unchanged.
 
 ## Developing
 

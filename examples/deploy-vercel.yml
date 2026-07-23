@@ -20,7 +20,7 @@ jobs:
     with:
       env: ${{ inputs.env }}
       vercel-scope: aragon-app
-      op-vercel-token-path: op://kv_app_infra/VERCEL_TOKEN/credential
+      op-infra-vault: kv_app_infra # expects VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID items in this vault
       op-env-vault: kv_app_${{ inputs.env }}
       setup-command: pnpm run setup ${{ inputs.env }}
       domain: ${{ inputs.env == 'production' && 'app.aragon.org' || '' }}

@@ -17,6 +17,15 @@ on:
         description: "Branch, tag or SHA to deploy"
         required: false
         type: string
+      allow-unsafe-pr-checkout:
+        description: |
+          Pass-through to actions/checkout's `allow-unsafe-pr-checkout`. Only set this to true if
+          THIS workflow is called from a `pull_request_target` / `workflow_run` trigger that
+          intentionally deploys fork PR code via `ref`, and the risk at
+          https://gh.io/securely-using-pull_request_target has been reviewed. Defaults to false.
+        required: false
+        type: boolean
+        default: false
       remote-path:
         description: "Directory on the server to sync the repo into"
         required: false
@@ -55,43 +64,30 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
     steps:
-      - name: Validate 1Password inputs
-        env:
-          PATHS: |
-            ${{ inputs.op-ssh-key-path }}
-            ${{ inputs.op-ssh-user-path }}
-            ${{ inputs.op-ssh-host-path }}
-        run: |
-          set -euo pipefail
-          while IFS= read -r p; do
-            [ -z "${p// }" ] && continue
-            if ! [[ "$p" =~ ^op://[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+/[A-Za-z0-9\ ._-]+$ ]]; then
-              echo "::error::Invalid op:// path: $p" >&2
-              exit 1
-            fi
-          done <<< "$PATHS"
+      # The only 1Password call in this workflow — see steps/credential-retrieval. Op:// format
+      # validation now lives there too, so this no longer needs its own copy of that regex.
+      - name: Resolve SSH credentials
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            SSH_KEY=${{ inputs.op-ssh-key-path }}
+            SSH_USER=${{ inputs.op-ssh-user-path }}
+            SSH_HOST=${{ inputs.op-ssh-host-path }}
 
       - name: Checkout
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 1
-
-      - name: Load SSH credentials
-        id: secrets
-        uses: 1password/load-secrets-action@860a5d856924d259f6dcc493575a0b1bb0ae2dde # v4.0.1
-        with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          SSH_KEY: ${{ inputs.op-ssh-key-path }}
-          SSH_USER: ${{ inputs.op-ssh-user-path }}
-          SSH_HOST: ${{ inputs.op-ssh-host-path }}
+          allow-unsafe-pr-checkout: ${{ inputs.allow-unsafe-pr-checkout }}
 
       - name: Configure SSH
         env:
-          SSH_KEY: ${{ steps.secrets.outputs.SSH_KEY }}
-          SSH_HOST: ${{ steps.secrets.outputs.SSH_HOST }}
+          SSH_KEY: ${{ fromJSON(steps.op.outputs.secrets).SSH_KEY }}
+          SSH_HOST: ${{ fromJSON(steps.op.outputs.secrets).SSH_HOST }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -101,8 +97,8 @@ jobs:
 
       - name: Sync repo to server
         env:
-          SSH_USER: ${{ steps.secrets.outputs.SSH_USER }}
-          SSH_HOST: ${{ steps.secrets.outputs.SSH_HOST }}
+          SSH_USER: ${{ fromJSON(steps.op.outputs.secrets).SSH_USER }}
+          SSH_HOST: ${{ fromJSON(steps.op.outputs.secrets).SSH_HOST }}
           REMOTE_PATH: ${{ inputs.remote-path }}
         run: |
           set -euo pipefail
@@ -112,8 +108,8 @@ jobs:
 
       - name: Run remote deploy command
         env:
-          SSH_USER: ${{ steps.secrets.outputs.SSH_USER }}
-          SSH_HOST: ${{ steps.secrets.outputs.SSH_HOST }}
+          SSH_USER: ${{ fromJSON(steps.op.outputs.secrets).SSH_USER }}
+          SSH_HOST: ${{ fromJSON(steps.op.outputs.secrets).SSH_HOST }}
           REMOTE_PATH: ${{ inputs.remote-path }}
           DEPLOY_COMMAND: ${{ inputs.deploy-command }}
         run: |
