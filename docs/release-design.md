@@ -219,6 +219,7 @@ mapper files use; action scripts must not depend on consumer `node_modules`.
 | Module | Purpose |
 |---|---|
 | `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root; monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages` |
+| `release-pr-refresh.yml` | on release-PR push (opened/synchronize/reopened): regenerate the history summary (incl. the ⚠️ open-tickets warning) and rewrite the PR body, re-appending the `slack_ts` marker so Slack threading survives. History mode only — `packages` summaries detect bumps via dirty files and cannot be re-derived after the release commit |
 | `release-finalize.yml` | on release-PR merge: tag (the *only* tagging point) + GitHub Release + notify. The caller picks the tag target via `sha` — the PR head SHA (the staging-**tested** commit, recommended) or the merge SHA (linear-history repos); optional `changesets-guard` |
 | `deploy-vercel.yml` | Vercel build+deploy; `VERCEL_TOKEN` referenced only here; optional domain alias, `workspace` for monorepos, runtime env lifting, Sentry source maps |
 | `deploy-docker.yml` | build-on-server Docker-over-SSH deploy to an environment |

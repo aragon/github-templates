@@ -1,9 +1,10 @@
 name: Generate Release Summary
 description: |
   Generates a PR/Slack-friendly release summary from the git log range (optionally enriched with
-  Linear issue titles). The range starts at the latest tag matching 'tag-glob'; in a monorepo,
-  'path-filter' (a named filter in the consumer's filters file) restricts the summary to commits
-  touching one workspace's paths.
+  Linear issue titles; tickets that are not completed/canceled surface in a leading '⚠️ Open
+  tickets' section with their current status — a warning, never a gate). The range starts at the
+  latest tag matching 'tag-glob'; in a monorepo, 'path-filter' (a named filter in the consumer's
+  filters file) restricts the summary to commits touching one workspace's paths.
 
 inputs:
   linear-api-token:

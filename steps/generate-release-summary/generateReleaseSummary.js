@@ -130,6 +130,10 @@ const collectScopedCommits = ({
     );
 };
 
+// Linear state types that mean a ticket is finished; anything else (triage, backlog,
+// unstarted, started) counts as open and is surfaced in the summary's warning section.
+const CLOSED_STATE_TYPES = new Set(['completed', 'canceled']);
+
 // Linear personal API keys (lin_api_…) are sent bare; OAuth2 access tokens need a
 // 'Bearer ' prefix or the API returns 401. Accept either, and an already-prefixed value.
 const linearAuthorization = (token) =>
@@ -155,6 +159,10 @@ const fetchLinearIssue = async (issueId, token) => {
             issue(id: $id) {
               title
               url
+              state {
+                name
+                type
+              }
             }
           }
         `,
@@ -236,6 +244,7 @@ const generateSummary = async ({ core }) => {
 
     const linearRegex = /([a-zA-Z]{2,}-\d+)/g;
     const issuesFound = new Set();
+    const openIssues = [];
 
     for (const { subject: line } of commits) {
         const lower = line.toLowerCase();
@@ -275,6 +284,9 @@ const generateSummary = async ({ core }) => {
                 const issue = await fetchLinearIssue(issueId, linearToken);
                 if (issue) {
                     additionalInfo += ` [${issueId}: ${issue.title}](${issue.url})`;
+                    if (issue.state && !CLOSED_STATE_TYPES.has(issue.state.type)) {
+                        openIssues.push(issue);
+                    }
                 } else {
                     additionalInfo += ` ${issueId}`;
                 }
@@ -287,6 +299,17 @@ const generateSummary = async ({ core }) => {
 
     // 2. Format Output
     let summary = '';
+
+    // Tickets referenced by this release that are not completed/canceled yet. Placed
+    // first so reviewers see un-QA'd work before merging; the release is never blocked.
+    if (openIssues.length > 0) {
+        summary += '## ⚠️ Open tickets\n';
+        openIssues.forEach(
+            (issue) =>
+                (summary += `- [${issue.id}: ${issue.title}](${issue.url}) — ${issue.state.name}\n`),
+        );
+        summary += '\n';
+    }
 
     if (categories.features.length > 0) {
         summary += '## Features\n';
