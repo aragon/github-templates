@@ -43,12 +43,14 @@ jobs:
       op-gpg-passphrase-path: op://kv_app_infra/arabot-1_SIGN_CERTS/credential
       op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
       op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
       op-linear-token-path: op://kv_app_infra/LINEAR_API_TOKEN/credential
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
   # On every push to a release/app/* PR: regenerate the scoped summary (incl. the ⚠️
-  # open-tickets warning) and rewrite the PR body, preserving the slack_ts marker.
+  # open-tickets warning), rewrite the PR body preserving the slack_ts marker, and — because
+  # the op-slack-* paths are set — edit the Slack head message in place to match.
   refresh:
     if: >
       github.event_name == 'pull_request'
@@ -61,6 +63,9 @@ jobs:
       summary-path-filter: app
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
       op-linear-token-path: op://kv_app_infra/LINEAR_API_TOKEN/credential
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 

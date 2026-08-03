@@ -41,12 +41,12 @@ Every release/deploy module works for a **single-package repo with the defaults*
 
 | Workflow | Purpose |
 |----------|---------|
-| `release-start.yml` | guard → compute version → cut the release branch → summary → open PR → Slack thread |
-| `release-pr-refresh.yml` | on release-PR push: regenerate the summary (incl. the ⚠️ open-tickets warning) and rewrite the PR body, preserving the `slack_ts` marker |
+| `release-start.yml` | guard → compute version → cut the release branch → summary → open PR → Slack thread; optional stale-version guard, `body-extras`, codeowners ping |
+| `release-pr-refresh.yml` | on release-PR push: regenerate the summary (incl. the ⚠️ open-tickets warning), rewrite the PR body preserving the `slack_ts` marker, and optionally edit the Slack head message in place |
 | `release-finalize.yml` | on release-PR merge: tag (the only tagging point) + GitHub Release — the caller picks the tag target (`sha`: tested head vs merge commit) |
 | `deploy-vercel.yml` | Vercel build + deploy (token resolved only here); monorepo `workspace`, runtime env lifting, optional Sentry source maps |
-| `deploy-docker.yml` | build-on-server Docker deploy over SSH |
-| `e2e.yml` | Playwright smoke / build-verification runner (`working-directory` for monorepos) |
+| `deploy-docker.yml` | build-on-server Docker deploy over SSH; optional Slack gate/result messages (`gate-ts` output) and vault-sourced env file |
+| `e2e.yml` | Playwright smoke / build-verification runner (`working-directory` for monorepos; wallet/extension suites via `env-secret-refs`, `pre-test-command`, `use-xvfb`, `extra-cache-path`) |
 | `release-self.yml` | this repo's own release (semver tag + moving major) |
 
 ## Using a module

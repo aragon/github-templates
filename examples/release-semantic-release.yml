@@ -1,7 +1,8 @@
 # Example: semantic-release release (scenario C backend).
 # Same orchestration as the changesets example — only `engine` changes. Repo-specific policies
-# (stale-lineage guard, DB-migration detection) live in this caller as separate jobs/steps, NOT in
-# the shared module. Pin @main to a SHA in real use.
+# plug in via optional inputs: the stale-lineage guard is `require-version-above-latest-tag`,
+# caller-computed blocks (e.g. a DB-migration warning, produced by a preceding job in this file)
+# ride `body-extras` into the PR body and Slack message. Pin @main to a SHA in real use.
 
 name: Release (semantic-release)
 
@@ -18,6 +19,11 @@ jobs:
     with:
       engine: semantic-release
       base-ref: ${{ github.ref_name }}
+      # Linear-history repos (back-merge model): refuse a computed version that is not above the
+      # latest tag — catches a stale base branch before a branch/PR is cut.
+      require-version-above-latest-tag: true
+      # Caller-computed markdown for the PR body + Slack message, e.g. from a preceding job:
+      # body-extras: ${{ needs.detect-migrations.outputs.warning }}
       op-release-token-path: op://kv_backend2_infra/ARABOT_APP_BACKEND_RELEASES/credential
       op-gpg-key-path: op://kv_backend2_infra/arabot-1_SIGN_CERTS/private_key
       op-gpg-passphrase-path: op://kv_backend2_infra/arabot-1_SIGN_CERTS/credential

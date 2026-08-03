@@ -7,8 +7,9 @@
 # package-dir / tag-prefix / scope / release-branch-prefix (e.g. 'apps/app', '@aragon/app@',
 # 'app', 'release/app/').
 #
-# Repo-specific policies (stale-lineage guard, DB-migration detection, hotfix specifics) belong in
-# the caller's thin wrapper, not here.
+# Repo-specific policies plug in via inputs: 'require-version-above-latest-tag' (stale-lineage
+# guard), 'body-extras' (caller-computed block in the PR body + Slack). Hotfix specifics stay in
+# the caller.
 #
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
 
@@ -79,6 +80,15 @@ on:
         required: false
         type: string
         default: "fail"
+      require-version-above-latest-tag:
+        description: |
+          Fail when the computed version is not strictly above the latest '<tag-prefix>*' tag —
+          catches a stale base branch (e.g. a missing back-merge after a release from another
+          branch). Off by default; single-lineage repos releasing from their default branch
+          don't need it.
+        required: false
+        type: boolean
+        default: false
       summary-mode:
         description: |
           PR body style: 'history' (commit-log summary via generate-release-summary) or
@@ -96,6 +106,14 @@ on:
         required: false
         type: string
         default: ".github/filters.yml"
+      body-extras:
+        description: |
+          Caller-computed markdown appended below the generated summary in the PR body and the
+          Slack message (e.g. a DB-migration warning). Pass the same value to release-pr-refresh
+          so body rewrites preserve it.
+        required: false
+        type: string
+        default: ""
       git-user-name:
         description: "Committer name when no GPG key is configured"
         required: false
@@ -127,6 +145,11 @@ on:
         default: ""
       op-slack-channel-id-path:
         description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-codeowners-group-path:
+        description: "1Password path to a Slack user-group id pinged (<!subteam^…>) in the release message (optional)"
         required: false
         type: string
         default: ""
@@ -189,6 +212,7 @@ jobs:
             GPG_PASSPHRASE=${{ inputs.op-gpg-passphrase-path }}
             SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
             SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+            SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
             LINEAR_API_TOKEN=${{ inputs.op-linear-token-path }}
 
       - name: Setup
@@ -254,6 +278,27 @@ jobs:
           tag-prefix: ${{ inputs.tag-prefix }}
           base-branch: ${{ inputs.base-ref }}
           github-token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
+
+      # A base branch missing the latest release mints an already-taken version. Ordering: sort -V.
+      - name: Guard — version must exceed the latest tag
+        if: ${{ inputs.require-version-above-latest-tag && steps.version.outputs.released == 'true' && steps.version.outputs.version != '' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+          LATEST_TAG=$(git tag --list "${TAG_PREFIX}[0-9]*" --sort=-v:refname | head -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No '${TAG_PREFIX}*' tags yet — nothing to compare against."
+            exit 0
+          fi
+          LATEST="${LATEST_TAG#"$TAG_PREFIX"}"
+          HIGHEST=$(printf '%s\n%s\n' "$LATEST" "$VERSION" | sort -V | tail -n 1)
+          if [ "$VERSION" = "$LATEST" ] || [ "$HIGHEST" != "$VERSION" ]; then
+            echo "::error::Computed version $VERSION is not above the latest released tag $LATEST_TAG — the base branch is stale. Back-merge the release target into it and retry." >&2
+            exit 1
+          fi
+          echo "Computed version $VERSION is above the latest tag $LATEST_TAG."
 
       - name: Nothing to release
         if: ${{ steps.guard.outputs.proceed == 'true' && steps.version.outputs.released != 'true' }}
@@ -355,7 +400,10 @@ jobs:
           base: ${{ inputs.target-branch }}
           head: ${{ steps.branch.outputs.name }}
           title: "Release ${{ steps.branch.outputs.label }}"
-          body: ${{ steps.history-summary.outputs.summary || steps.packages-summary.outputs.summary }}
+          body: |
+            ${{ steps.history-summary.outputs.summary || steps.packages-summary.outputs.summary }}
+
+            ${{ inputs.body-extras }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
       # Ceremony steps must not fail a release that is already cut — hence continue-on-error.
@@ -368,9 +416,13 @@ jobs:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           message: |
-            :rocket: *Release ${{ steps.branch.outputs.label }} started*
+            :rocket: *Release ${{ steps.branch.outputs.label }} started*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
             *PR:* ${{ steps.pr.outputs.url }}
             Branch: `${{ steps.branch.outputs.name }}` · by ${{ github.actor }}
+
+            ${{ steps.history-summary.outputs.summary || steps.packages-summary.outputs.summary }}
+
+            ${{ inputs.body-extras }}
 
       - name: Read PR body
         id: pr-body
@@ -381,8 +433,9 @@ jobs:
           pr-number: ${{ steps.pr.outputs.number }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
-      # The marker lets downstream flows (release-finalize, cancel) thread their Slack updates.
-      - name: Persist Slack thread marker on PR
+      # The PR body is this release's cross-run state: the thread downstream flows reply into,
+      # and the actor a refresh must not re-attribute to the last pusher.
+      - name: Persist release markers on PR
         if: ${{ steps.pr-body.outcome == 'success' && steps.slack.outputs.ts != '' }}
         continue-on-error: true
         uses: aragon/github-templates/steps/gh-pr-edit-body@main
@@ -393,3 +446,4 @@ jobs:
             ${{ steps.pr-body.outputs.body }}
 
             <!-- slack_ts: ${{ steps.slack.outputs.ts }} -->
+            <!-- release_actor: ${{ github.actor }} -->

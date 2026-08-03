@@ -23,5 +23,13 @@ jobs:
       op-ssh-key-path: op://apikeys_production/backend2_server_${{ inputs.env }}/deploy_cert
       op-ssh-user-path: op://apikeys_production/backend2_server_${{ inputs.env }}/username
       op-ssh-host-path: op://apikeys_production/backend2_server_${{ inputs.env }}/URL
+      # Optional extras — all off by default:
+      #   op-env-vault: kv_backend_${{ inputs.env }}          # materialize .env next to the code
+      #   version: ${{ inputs.env }}                          # label shown in Slack messages
+      #   slack-thread-ts: <a release thread ts>              # thread the ceremony under a release
+      #   op-slack-bot-token-path: op://.../SLACK_BOT_TOKEN/credential   # enables gate/result jobs
+      #   op-slack-channel-id-path: op://.../SLACK_CHANNEL_ID/credential
+      #   op-slack-codeowners-group-path: op://.../SLACK_CODEOWNERS_GROUP_ID/credential
+      # The workflow outputs `gate-ts` — thread rollback/follow-up messages under the gate message.
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_TEMP }}

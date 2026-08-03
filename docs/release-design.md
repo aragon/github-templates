@@ -113,11 +113,15 @@ The two mapper files (`release-scopes.yml`, `filters.yml`) are consumer-owned da
 ship the parser (a strict vendored flat-YAML subset in `lib/`) and the resolution logic. Monorepo
 semantic-release is explicitly out of scope (only Changesets repos are monorepos here).
 
-Repo-specific quirks that are **not** abstracted (they live in the consumer's thin caller as pre/post
-hooks, to keep module inputs small):
-- backend DB-migration detection and forward-only rollback policy,
-- backend stale-lineage guard (refuse a computed version ≤ latest tag),
-- app hotfix cherry-pick / back-merge specifics.
+Repo-specific quirks plug in through small optional inputs instead of forked workflows:
+- the backend stale-lineage guard (refuse a computed version ≤ latest tag) is
+  `require-version-above-latest-tag: true` on `release-start`;
+- caller-computed blocks like the backend DB-migration warning ride `body-extras` on
+  `release-start` / `release-pr-refresh` (the caller recomputes the block on each refresh);
+- app's Synpress build-verification rides the `e2e.yml` generics (`env-secret-refs`,
+  `pre-test-command`, `use-xvfb`, `extra-cache-path`).
+What stays in the consumer's thin caller: forward-only rollback policy, hotfix
+cherry-pick / back-merge specifics, per-service server config downloads.
 
 ---
 
@@ -218,12 +222,12 @@ mapper files use; action scripts must not depend on consumer `node_modules`.
 ### `.github/workflows/` — reusable workflows (`workflow_call`)
 | Module | Purpose |
 |---|---|
-| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root; monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages` |
-| `release-pr-refresh.yml` | on release-PR push (opened/synchronize/reopened): regenerate the history summary (incl. the ⚠️ open-tickets warning) and rewrite the PR body, re-appending the `slack_ts` marker so Slack threading survives. History mode only — `packages` summaries detect bumps via dirty files and cannot be re-derived after the release commit |
+| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root; monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages`; optional `require-version-above-latest-tag` (stale-lineage guard), `body-extras` (caller block in PR body + Slack), `op-slack-codeowners-group-path` (subteam ping) |
+| `release-pr-refresh.yml` | on release-PR push (opened/synchronize/reopened): regenerate the history summary (incl. the ⚠️ open-tickets warning) and rewrite the PR body, re-appending the `slack_ts` marker so Slack threading survives; with the optional `op-slack-*` paths it also edits the Slack head message in place (`chat.update`), and `body-extras` re-appends the caller block. History mode only — `packages` summaries detect bumps via dirty files and cannot be re-derived after the release commit |
 | `release-finalize.yml` | on release-PR merge: tag (the *only* tagging point) + GitHub Release + notify. The caller picks the tag target via `sha` — the PR head SHA (the staging-**tested** commit, recommended) or the merge SHA (linear-history repos); optional `changesets-guard` |
 | `deploy-vercel.yml` | Vercel build+deploy; `VERCEL_TOKEN` referenced only here; optional domain alias, `workspace` for monorepos, runtime env lifting, Sentry source maps |
-| `deploy-docker.yml` | build-on-server Docker-over-SSH deploy to an environment |
-| `e2e.yml` | Playwright smoke/BV runner + result parsing + report artifact; `working-directory` for monorepos |
+| `deploy-docker.yml` | build-on-server Docker-over-SSH deploy to an environment; optional Slack gate/result ceremony (`gate-ts` output for rollback threading, gate job never blocks the deploy) and `op-env-vault` env-file materialization |
+| `e2e.yml` | Playwright smoke/BV runner + result parsing + report artifact; `working-directory` for monorepos; wallet/extension suites via the optional generics `env-secret-refs` (+ optional `OP_SERVICE_ACCOUNT_TOKEN`), `pre-test-command`, `use-xvfb`, `extra-cache-path` |
 | `release-self.yml` | github-templates' own semver + moving-major release (dogfood) |
 
 ### Other

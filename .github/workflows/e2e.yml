@@ -3,6 +3,10 @@
 # Works for single-package repos with the defaults, and for monorepos via 'working-directory'
 # (e.g. 'apps/app' — scripts, results and report paths all resolve inside it).
 #
+# Suites needing more than a headless browser (wallet/extension flows) use the optional generics
+# 'env-secret-refs', 'pre-test-command', 'use-xvfb' and 'extra-cache-path'. All default off: the
+# plain smoke path needs no secrets.
+#
 # SELF-REFERENCE NOTE: composite actions are referenced as `aragon/github-templates/steps/*@main`
 # because a relative `./steps/*` inside a reusable workflow would resolve against the CALLER repo,
 # not this one. `@main` is the bootstrap default — `release-self` + Dependabot pin these to the cut
@@ -41,6 +45,37 @@ on:
         required: false
         type: string
         default: ""
+      pre-test-command:
+        description: |
+          Command run in working-directory after browser install and before the tests (e.g. build a
+          Synpress wallet cache). Sees the 'env-secret-refs' env vars and EXTRA_CACHE_HIT
+          ('true'/'false' — the extra-cache-path restore result) to skip expensive rebuilds.
+        required: false
+        type: string
+        default: ""
+      use-xvfb:
+        description: "Run pre-test-command and test-command under 'xvfb-run' (headed browsers / extension flows)"
+        required: false
+        type: boolean
+        default: false
+      env-secret-refs:
+        description: |
+          Newline-separated NAME=op://vault/item/field pairs exported (masked) into the job
+          environment for pre-test-command and test-command — wallet passwords, seeds, API keys.
+          Requires the OP_SERVICE_ACCOUNT_TOKEN secret when non-empty.
+        required: false
+        type: string
+        default: ""
+      extra-cache-path:
+        description: "Extra path to cache between runs (e.g. a Synpress wallet cache directory)"
+        required: false
+        type: string
+        default: ""
+      extra-cache-key-files:
+        description: "File pattern(s) hashed into the extra cache key (hashFiles() syntax, comma-separated)"
+        required: false
+        type: string
+        default: ""
       results-path:
         description: "Playwright JSON results file; empty = <working-directory>/e2e/test-results/results.json"
         required: false
@@ -61,6 +96,10 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token — only needed when 'env-secret-refs' is set"
+        required: false
     outputs:
       result:
         description: "Outcome: passed, flaky, failed, cancelled"
@@ -91,6 +130,33 @@ jobs:
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
 
+      - name: Resolve 1Password secrets
+        id: op
+        if: inputs.env-secret-refs != ''
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: ${{ inputs.env-secret-refs }}
+
+      # Job-wide: test-runner configs read process.env. Already masked by credential-retrieval.
+      - name: Export test env secrets
+        if: inputs.env-secret-refs != ''
+        env:
+          SECRETS_JSON: ${{ steps.op.outputs.secrets }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r key; do
+            value=$(jq -r --arg k "$key" '.[$k]' <<< "$SECRETS_JSON")
+            # Random delimiter: a value containing a fixed one could inject extra env vars.
+            delim="ghaenv_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+            {
+              echo "${key}<<$delim"
+              echo "$value"
+              echo "$delim"
+            } >> "$GITHUB_ENV"
+          done < <(jq -r 'keys[]' <<< "$SECRETS_JSON")
+
       - name: Get Playwright version
         id: pw-version
         working-directory: ${{ inputs.working-directory }}
@@ -113,6 +179,29 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: pnpm exec playwright install-deps chromium
 
+      - name: Cache extra test assets
+        id: extra-cache
+        if: inputs.extra-cache-path != ''
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ inputs.extra-cache-path }}
+          key: e2e-extra-${{ inputs.mode }}-${{ runner.os }}-${{ hashFiles(inputs.extra-cache-key-files) }}
+
+      # xvfb-run prefixes only the first command of a `&&` chain; wrap chains in `bash -c`.
+      - name: Prepare test environment
+        if: inputs.pre-test-command != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          EXTRA_CACHE_HIT: ${{ steps.extra-cache.outputs.cache-hit == 'true' }}
+          USE_XVFB: ${{ inputs.use-xvfb }}
+        run: |
+          set -euo pipefail
+          PREFIX=""
+          if [ "$USE_XVFB" = "true" ]; then
+            PREFIX="xvfb-run --auto-servernum"
+          fi
+          $PREFIX ${{ inputs.pre-test-command }}
+
       - name: Warmup deployment
         env:
           E2E_BASE_URL: ${{ inputs.deployment-url }}
@@ -132,13 +221,18 @@ jobs:
         env:
           E2E_BASE_URL: ${{ inputs.deployment-url }}
           MODE: ${{ inputs.mode }}
+          USE_XVFB: ${{ inputs.use-xvfb }}
         run: |
           set -euo pipefail
           case "$MODE" in
             smoke|bv) ;;
             *) echo "::error::mode must be 'smoke' or 'bv', got '$MODE'"; exit 1 ;;
           esac
-          ${{ inputs.test-command != '' && inputs.test-command || 'pnpm "e2e:$MODE"' }}
+          PREFIX=""
+          if [ "$USE_XVFB" = "true" ]; then
+            PREFIX="xvfb-run --auto-servernum"
+          fi
+          $PREFIX ${{ inputs.test-command != '' && inputs.test-command || 'pnpm "e2e:$MODE"' }}
 
       - name: Parse Playwright results
         id: playwright-result
@@ -153,7 +247,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report-${{ inputs.environment }}
+          # bv gets its own artifact name so smoke and bv against the same environment can share
+          # one workflow run without an upload collision (artifacts are immutable).
+          name: ${{ inputs.mode == 'bv' && format('playwright-bv-report-{0}', inputs.environment) || format('playwright-report-{0}', inputs.environment) }}
           path: ${{ inputs.report-path != '' && inputs.report-path || format('{0}/e2e/playwright-report/', inputs.working-directory) }}
           retention-days: 14
 
@@ -184,6 +280,6 @@ jobs:
         if: ${{ always() && steps.playwright-result.outputs.result != 'passed' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-traces-${{ inputs.environment }}
+          name: ${{ inputs.mode == 'bv' && format('playwright-bv-traces-{0}', inputs.environment) || format('playwright-traces-{0}', inputs.environment) }}
           path: ${{ format('{0}/e2e/test-results/', inputs.working-directory) }}
           retention-days: 7

@@ -10,7 +10,8 @@
 # Degrades gracefully — every integration is optional:
 #   - no Linear token → summary has no enrichment and no open-tickets section;
 #   - no Slack in the repo → there is no slack_ts marker to carry, nothing is appended;
-#   - Slack itself is never called here.
+#   - Slack head-message refresh happens only when the op-slack-* paths are set AND the
+#     PR body carries a marker (i.e. release-start posted the head message).
 # The PR body is owned by this automation: manual edits to it are overwritten on the
 # next push (matching release-start, which authored it in the first place).
 #
@@ -46,12 +47,35 @@ on:
         required: false
         type: string
         default: ".github/filters.yml"
+      body-extras:
+        description: |
+          Caller-computed markdown appended below the refreshed summary in the PR body and the
+          Slack head message — pass the same (re-computed) value release-start received, or the
+          block is lost on the rewrite.
+        required: false
+        type: string
+        default: ""
       op-release-token-path:
         description: "1Password path to a GitHub PAT used to edit the PR body"
         required: true
         type: string
       op-linear-token-path:
         description: "1Password path to a Linear API token to enrich the summary (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token, to refresh the head message in place (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-codeowners-group-path:
+        description: "1Password path to a Slack user-group id pinged (<!subteam^…>) in the refreshed head message (optional)"
         required: false
         type: string
         default: ""
@@ -69,8 +93,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Not on 'opened': that run races release-start's body edit and can drop the slack_ts marker.
   refresh:
-    if: startsWith(github.head_ref, inputs.release-branch-prefix)
+    if: ${{ github.event.action != 'opened' && startsWith(github.head_ref, inputs.release-branch-prefix) }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve 1Password secrets
@@ -82,6 +107,9 @@ jobs:
           secret-refs: |
             RELEASE_TOKEN=${{ inputs.op-release-token-path }}
             LINEAR_API_TOKEN=${{ inputs.op-linear-token-path }}
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+            SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
 
       # Full history: the summary range starts at the latest release tag.
       - name: Setup
@@ -116,6 +144,32 @@ jobs:
         with:
           body: ${{ steps.pr-body.outputs.body }}
 
+      - name: Read release markers
+        id: markers
+        env:
+          BODY: ${{ steps.pr-body.outputs.body }}
+          TS: ${{ steps.slack-ts.outputs.ts }}
+          PR_CREATED_AT: ${{ github.event.pull_request.created_at }}
+        run: |
+          set -euo pipefail
+          ACTOR=$(printf '%s\n' "$BODY" \
+            | sed -nE 's@^[[:space:]]*<!-- release_actor: ([A-Za-z0-9_.-]+) -->[[:space:]]*$@\1@p' \
+            | head -n 1)
+          echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+          # A ts older than the PR belongs to another release: drop it rather than
+          # chat.update someone else's message.
+          if [ -z "$TS" ]; then
+            echo "ts=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CREATED=$(node -p 'Math.floor(Date.parse(process.env.PR_CREATED_AT) / 1000)')
+          if [ "${TS%%.*}" -lt "$CREATED" ]; then
+            echo "::warning::Ignoring slack_ts $TS — it predates the PR."
+            echo "ts=" >> "$GITHUB_OUTPUT"
+          else
+            echo "ts=$TS" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Update PR body
         uses: aragon/github-templates/steps/gh-pr-edit-body@main
         with:
@@ -124,4 +178,25 @@ jobs:
           body: |
             ${{ steps.summary.outputs.summary }}
 
-            ${{ steps.slack-ts.outputs.ts && format('<!-- slack_ts: {0} -->', steps.slack-ts.outputs.ts) || '' }}
+            ${{ inputs.body-extras }}
+
+            ${{ steps.markers.outputs.ts && format('<!-- slack_ts: {0} -->', steps.markers.outputs.ts) || '' }}
+            ${{ steps.markers.outputs.actor && format('<!-- release_actor: {0} -->', steps.markers.outputs.actor) || '' }}
+
+      # chat.update on the head message release-start posted; thread replies stay untouched.
+      - name: Update Slack head message
+        if: ${{ inputs.op-slack-bot-token-path != '' && steps.markers.outputs.ts != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          update-ts: ${{ steps.markers.outputs.ts }}
+          message: |
+            :rocket: *${{ github.event.pull_request.title }} started*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
+            *PR:* ${{ github.event.pull_request.html_url }}
+            Branch: `${{ github.head_ref }}`${{ steps.markers.outputs.actor && format(' · by {0}', steps.markers.outputs.actor) || '' }}
+
+            ${{ steps.summary.outputs.summary }}
+
+            ${{ inputs.body-extras }}

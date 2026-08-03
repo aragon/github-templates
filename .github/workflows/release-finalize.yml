@@ -83,6 +83,12 @@ on:
 permissions:
   contents: write
 
+# Serialized per lineage (tag-prefix): two near-simultaneous merges must finalize one at a time —
+# gh-ensure-tag would fail loudly on a same-tag/different-SHA race, but queueing avoids the noise.
+concurrency:
+  group: release-finalize-${{ github.repository }}-${{ inputs.tag-prefix }}
+  cancel-in-progress: false
+
 jobs:
   finalize:
     runs-on: ubuntu-latest

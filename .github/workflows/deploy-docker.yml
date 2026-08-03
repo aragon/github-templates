@@ -2,6 +2,10 @@
 # supplies its own remote deploy command (e.g. scripts/app-deploy.sh) because that orchestration is
 # service-specific. SSH credentials are resolved from 1Password paths only inside this workflow.
 #
+# Optional Slack ceremony, off unless the op-slack-* paths are passed: notify-gate announces the
+# pending approval, notify-result reports the outcome, and `gate-ts` lets callers thread follow-ups.
+# Per-service config downloads and health checks stay in the caller or the deploy-command.
+#
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
 
 name: Deploy (Docker over SSH)
@@ -47,10 +51,49 @@ on:
         description: "1Password path to the SSH host"
         required: true
         type: string
+      op-env-vault:
+        description: "1Password vault bulk-loaded into 'env-file-path' before the sync, so the server receives a fresh env file (optional)"
+        required: false
+        type: string
+        default: ""
+      env-file-path:
+        description: "Checkout-relative file the 'op-env-vault' secrets are written to"
+        required: false
+        type: string
+        default: ".env"
+      version:
+        description: "Version label shown in the Slack messages (optional)"
+        required: false
+        type: string
+        default: ""
+      slack-thread-ts:
+        description: "Existing Slack thread to post the gate/result messages into (e.g. a release thread); empty = new top-level messages"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token — enables the notify-gate / notify-result jobs (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-codeowners-group-path:
+        description: "1Password path to a Slack user-group id pinged (<!subteam^…>) in the gate message (optional)"
+        required: false
+        type: string
+        default: ""
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         description: "1Password service account token scoped to the caller repo's vault"
         required: true
+    outputs:
+      gate-ts:
+        description: "Slack ts of the notify-gate message (empty when Slack is off) — thread rollback/follow-up messages under it"
+        value: ${{ jobs.notify-gate.outputs.ts }}
 
 permissions:
   contents: read
@@ -60,6 +103,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Sibling of `deploy`, never in its `needs`: a failed notification must not block the deploy.
+  notify-gate:
+    if: inputs.op-slack-bot-token-path != ''
+    runs-on: ubuntu-latest
+    outputs:
+      ts: ${{ steps.slack.outputs.ts }}
+    steps:
+      - name: Resolve Slack secrets
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+            SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
+
+      - name: Notify Slack — waiting for approval
+        id: slack
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          thread-ts: ${{ inputs.slack-thread-ts }}
+          message: |
+            :double_vertical_bar: *Waiting for approval — deploy to ${{ inputs.env }}*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
+            ${{ inputs.version != '' && format('*Version:* `{0}`', inputs.version) || '' }}
+            *Ref:* `${{ inputs.ref || github.ref_name }}`
+            Approve the deploy: [here](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
@@ -83,6 +158,16 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 1
           allow-unsafe-pr-checkout: ${{ inputs.allow-unsafe-pr-checkout }}
+
+      # Written before the rsync so the file travels to the server with the code.
+      - name: Materialize env file from vault
+        if: inputs.op-env-vault != ''
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: alltofile
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          op-vault: ${{ inputs.op-env-vault }}
+          secret-filepath: ${{ inputs.env-file-path }}
 
       - name: Configure SSH
         env:
@@ -120,3 +205,31 @@ jobs:
       - name: Cleanup SSH key
         if: always()
         run: rm -f ~/.ssh/deploy_key
+
+  notify-result:
+    if: ${{ always() && inputs.op-slack-bot-token-path != '' }}
+    needs: [notify-gate, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve Slack secrets
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+
+      # Threads under the caller's thread if given, else under the gate message.
+      - name: Notify Slack — deploy result
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          thread-ts: ${{ inputs.slack-thread-ts || needs.notify-gate.outputs.ts }}
+          message: |
+            ${{ needs.deploy.result == 'success' && format(':white_check_mark: *Deploy to {0} succeeded*', inputs.env) || format(':x: *Deploy to {0} — {1}*', inputs.env, needs.deploy.result) }}
+            ${{ inputs.version != '' && format('*Version:* `{0}`', inputs.version) || '' }}
+            *Ref:* `${{ inputs.ref || github.ref_name }}` · [logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
