@@ -14,10 +14,13 @@ jobs:
   steps:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup (install disabled — no package in this repo)
+      - name: Setup (install disabled — the root package has no dependencies or lockfile)
         uses: ./steps/setup
         with:
           install: "false"
+
+      - name: Unit tests (lib + action scripts)
+        run: node --test 'lib/*.test.js' 'steps/**/*.test.js'
 
       - name: extract-slack-ts
         id: ets
@@ -69,6 +72,87 @@ jobs:
 
       - name: generate-release-summary (git log of this repo)
         uses: ./steps/generate-release-summary
+
+      - name: generate-release-summary (explicit path patterns)
+        uses: ./steps/generate-release-summary
+        with:
+          path-patterns: |
+            steps/**
+            lib/**
+
+      - name: make a fake package with a changelog
+        run: |
+          mkdir -p fixture
+          printf '{"name":"fixture-package","version":"1.1.0"}\n' > fixture/package.json
+          printf '## 1.1.0\n\n- feat: newest\n\n## 1.0.0\n\n- initial\n' > fixture/CHANGELOG.md
+
+      - name: read-changelog
+        id: changelog
+        uses: ./steps/read-changelog
+        with:
+          version: "1.1.0"
+          path: fixture/CHANGELOG.md
+
+      - name: assert read-changelog
+        env:
+          CHANGES: ${{ steps.changelog.outputs.changes }}
+        run: |
+          set -euo pipefail
+          [ "$CHANGES" = "- feat: newest" ] || { echo "::error::read-changelog failed: '$CHANGES'"; exit 1; }
+
+      # The fixture package.json is untracked, i.e. "dirty" — exactly how a `changeset version`
+      # bump looks to the action right before the release commit.
+      - name: generate-version-summary (single-package fixture)
+        id: version-summary
+        uses: ./steps/generate-version-summary
+        with:
+          package-dir: fixture
+
+      - name: assert generate-version-summary
+        env:
+          SUMMARY: ${{ steps.version-summary.outputs.summary }}
+        run: |
+          set -euo pipefail
+          echo "$SUMMARY" | grep -q '## fixture-package@1.1.0' || { echo "::error::version summary missing section: '$SUMMARY'"; exit 1; }
+          echo "$SUMMARY" | grep -q 'feat: newest' || { echo "::error::version summary missing changes: '$SUMMARY'"; exit 1; }
+
+      - name: changesets-guard — passes without pending changesets
+        uses: ./steps/changesets-guard
+
+      - name: make a pending changeset fixture
+        run: |
+          mkdir -p .changeset
+          printf -- '---\n"@aragon/fixture": patch\n---\n\nfix: pending\n' > .changeset/selftest-pending.md
+          printf 'app:\n  - "@aragon/fixture"\nother:\n  - "@aragon/other"\n' > fixture/release-scopes.yml
+
+      - name: changesets-guard — fails on a pending changeset
+        id: guard-all
+        continue-on-error: true
+        uses: ./steps/changesets-guard
+
+      - name: changesets-guard — in-scope changeset fails a scoped guard
+        id: guard-scoped
+        continue-on-error: true
+        uses: ./steps/changesets-guard
+        with:
+          scope: app
+          scopes-file: fixture/release-scopes.yml
+
+      - name: changesets-guard — out-of-scope changeset passes a scoped guard
+        uses: ./steps/changesets-guard
+        with:
+          scope: other
+          scopes-file: fixture/release-scopes.yml
+
+      - name: assert changesets-guard outcomes
+        env:
+          GUARD_ALL: ${{ steps.guard-all.outcome }}
+          GUARD_SCOPED: ${{ steps.guard-scoped.outcome }}
+        run: |
+          set -euo pipefail
+          rm -f .changeset/selftest-pending.md
+          [ "$GUARD_ALL" = "failure" ] || { echo "::error::expected failure, got '$GUARD_ALL'"; exit 1; }
+          [ "$GUARD_SCOPED" = "failure" ] || { echo "::error::expected failure, got '$GUARD_SCOPED'"; exit 1; }
 
       # credential-retrieval is the only action that talks to 1Password, so it needs a real
       # OP_SERVICE_ACCOUNT_TOKEN to exercise the happy path (out of scope for this secret-free

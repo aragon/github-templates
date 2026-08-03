@@ -24,5 +24,10 @@ jobs:
       op-env-vault: kv_app_${{ inputs.env }}
       setup-command: pnpm run setup ${{ inputs.env }}
       domain: ${{ inputs.env == 'production' && 'app.aragon.org' || '' }}
+      # Monorepo callers additionally set the workspace to deploy (and, per app, its own
+      # op-infra-vault — one Vercel project per vault):
+      #   workspace: apps/app
+      #   upload-sentry-source-maps: true
+      #   runtime-env-keys: SENTRY_DSN CRON_SECRET
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

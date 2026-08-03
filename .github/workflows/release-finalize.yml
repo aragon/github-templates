@@ -1,9 +1,11 @@
 # Reusable Release — Finalize. Called by the consumer on release-PR merge. This is the ONLY place a
-# release tag + GitHub Release is created, always on the merged (tested) commit.
+# release tag + GitHub Release is created.
 #
-# The caller passes the merge SHA + PR body (for the Slack thread marker), e.g.:
-#   merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
-#   pr-body:   ${{ github.event.pull_request.body }}
+# The caller chooses the tag-target policy via 'sha':
+#   sha: ${{ github.event.pull_request.head.sha }}          # tag the staging-TESTED commit (recommended)
+#   sha: ${{ github.event.pull_request.merge_commit_sha }}  # tag the merge commit (linear-history repos)
+# and passes the PR body for the Slack thread marker:
+#   pr-body: ${{ github.event.pull_request.body }}
 #
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
 
@@ -12,8 +14,8 @@ name: Release — Finalize
 on:
   workflow_call:
     inputs:
-      merge-sha:
-        description: "The merged commit SHA to tag"
+      sha:
+        description: "The commit to tag and to read version/changelog from (see header for the policy choice)"
         required: true
         type: string
       pr-body:
@@ -22,20 +24,38 @@ on:
         type: string
         default: ""
       version:
-        description: "Version override; if empty it is read from package.json at merge-sha"
+        description: "Version override; if empty it is read from <package-dir>/package.json at 'sha'"
         required: false
         type: string
         default: ""
+      package-dir:
+        description: "Directory of the released package (monorepo: 'apps/app')"
+        required: false
+        type: string
+        default: "."
       tag-prefix:
-        description: "Tag prefix"
+        description: "Tag prefix; the tag is '<tag-prefix><version>' (monorepo: '@aragon/app@')"
         required: false
         type: string
         default: "v"
       changelog-path:
-        description: "Path to CHANGELOG.md"
+        description: "Path to the released package's CHANGELOG; empty = <package-dir>/CHANGELOG.md"
         required: false
         type: string
-        default: "./CHANGELOG.md"
+        default: ""
+      changesets-guard:
+        description: |
+          Fail before tagging when pending .changeset/*.md files exist at 'sha' (added after
+          'changeset version' — the release would ship an unreleased entry). '' = off,
+          'all' = any pending changeset fails, '<scope-name>' = only in-scope changesets fail.
+        required: false
+        type: string
+        default: ""
+      scopes-file:
+        description: "Consumer-repo path to the package→release-scope mapper (used with a scoped changesets-guard)"
+        required: false
+        type: string
+        default: ".github/release-scopes.yml"
       op-release-token-path:
         description: "1Password path to a GitHub PAT used for tag + release creation"
         required: true
@@ -86,27 +106,48 @@ jobs:
         uses: aragon/github-templates/steps/setup@main
         with:
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
-          ref: ${{ inputs.merge-sha }}
+          ref: ${{ inputs.sha }}
           fetch-depth: "0"
           install: "false"
+
+      # The checkout above is at 'sha', so the guard reads the changesets AND the scope policy
+      # exactly as they were in the tested/merged tree — a mid-release scopes-file change on the
+      # target branch cannot reclassify leftover changesets.
+      - name: Guard — no pending changesets
+        if: inputs.changesets-guard != ''
+        uses: aragon/github-templates/steps/changesets-guard@main
+        with:
+          scope: ${{ inputs.changesets-guard != 'all' && inputs.changesets-guard || '' }}
+          scopes-file: ${{ inputs.scopes-file }}
 
       - name: Resolve version & tag
         id: resolve
         env:
           VERSION_INPUT: ${{ inputs.version }}
+          PACKAGE_DIR: ${{ inputs.package-dir }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: |
           set -euo pipefail
           VERSION="$VERSION_INPUT"
           if [ -z "$VERSION" ]; then
-            VERSION="$(node -p "require('./package.json').version")"
+            VERSION="$(node -p "require(require('node:path').resolve(process.env.PACKAGE_DIR, 'package.json')).version")"
           fi
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Refusing to tag an invalid version: $VERSION" >&2
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG_PREFIX}${VERSION}" >> "$GITHUB_OUTPUT"
+          TAG="${TAG_PREFIX}${VERSION}"
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9@._/-]+$ ]]; then
+            echo "::error::Computed tag contains characters invalid in a git ref: $TAG" >&2
+            exit 1
+          fi
+          # Monorepo tags contain '@' and '/', which must be percent-encoded in release URLs.
+          ENCODED_TAG="$(node -p "encodeURIComponent(process.argv[1])" "$TAG")"
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "encoded-tag=$ENCODED_TAG"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Extract Slack thread ts
         id: slack-ts
@@ -119,8 +160,10 @@ jobs:
         uses: aragon/github-templates/steps/read-changelog@main
         with:
           version: ${{ steps.resolve.outputs.version }}
-          path: ${{ inputs.changelog-path }}
+          path: ${{ inputs.changelog-path != '' && inputs.changelog-path || format('{0}/CHANGELOG.md', inputs.package-dir) }}
 
+      # The slack_ts marker is carried into the GitHub Release body so deploy flows triggered by
+      # the release event can keep threading into the same Slack conversation.
       - name: Build release notes
         id: notes
         uses: aragon/github-templates/steps/build-release-notes@main
@@ -132,22 +175,23 @@ jobs:
         uses: aragon/github-templates/steps/gh-ensure-tag@main
         with:
           tag: ${{ steps.resolve.outputs.tag }}
-          sha: ${{ inputs.merge-sha }}
+          sha: ${{ inputs.sha }}
 
       - name: Ensure GitHub Release
         uses: aragon/github-templates/steps/gh-ensure-release@main
         with:
           tag: ${{ steps.resolve.outputs.tag }}
-          title: "🚀 Release ${{ steps.resolve.outputs.tag }}"
+          title: "Release ${{ steps.resolve.outputs.tag }}"
           notes-path: ${{ steps.notes.outputs.path }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
       - name: Notify Slack — released
         if: inputs.op-slack-bot-token-path != ''
+        continue-on-error: true
         uses: aragon/github-templates/steps/slack-notify@main
         with:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           thread-ts: ${{ steps.slack-ts.outputs.ts }}
           message: |
-            :label: *Tagged ${{ steps.resolve.outputs.tag }}* and published the GitHub Release.
+            :label: *Tagged [${{ steps.resolve.outputs.tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.resolve.outputs.encoded-tag }})* and published the GitHub Release.

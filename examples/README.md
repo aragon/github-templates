@@ -31,7 +31,8 @@ Every workflow takes its 1Password paths as inputs and a single `OP_SERVICE_ACCO
 
 | File | Scenario | Shows |
 |------|----------|-------|
-| `release-changesets.yml` | A frontend / B library | `release-start` + `release-finalize` with `engine: changesets` |
+| `release-changesets.yml` | A frontend / B library (single-package) | `release-start` + `release-finalize` with `engine: changesets` |
+| `release-changesets-monorepo.yml` | A monorepo workspace | the same two workflows with `package-dir` / `tag-prefix` / `scope` / `release-branch-prefix` — one file per release lineage |
 | `release-semantic-release.yml` | C backend | `release-start` + `release-finalize` with `engine: semantic-release` + repo-specific pre-hooks |
 | `deploy-vercel.yml` | A / B | calling `deploy-vercel` behind a protected environment |
 | `deploy-docker.yml` | C | calling `deploy-docker` over SSH |

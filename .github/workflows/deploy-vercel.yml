@@ -4,6 +4,10 @@
 # the release system "restricts access to Vercel": the credentials have exactly one place they
 # can be read, behind the caller's protected environment.
 #
+# Works for single-package repos with the defaults, and for pnpm monorepos via 'workspace' —
+# a monorepo with several deployable apps calls this once per app, each with its own
+# workspace + op-infra-vault (one Vercel project per vault).
+#
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
 
 name: Deploy (Vercel)
@@ -28,23 +32,57 @@ on:
         description: "Vercel scope/org (e.g. aragon-app)"
         required: true
         type: string
+      workspace:
+        description: "Workspace directory to deploy (monorepo: 'apps/app'); '.' = single-package repo"
+        required: false
+        type: string
+        default: "."
       op-infra-vault:
         description: |
           1Password vault holding the Vercel credentials. Expects three items in that vault, named
           exactly VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID, each with a `credential`
-          field (e.g. op://kv_app_infra/VERCEL_PROJECT_ID/credential).
+          field (e.g. op://kv_app_infra/VERCEL_PROJECT_ID/credential). With
+          upload-sentry-source-maps, also SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT.
         required: true
         type: string
       op-env-vault:
-        description: "Optional 1Password vault to bulk-load environment secrets into .env before build"
+        description: "Optional 1Password vault to bulk-load environment secrets into <workspace>/.env before build"
         required: false
         type: string
         default: ""
       setup-command:
-        description: "Optional command run before the Vercel build (e.g. 'pnpm run setup production')"
+        description: "Optional command run in <workspace> before the Vercel build (e.g. 'pnpm run setup production')"
         required: false
         type: string
         default: ""
+      env-overrides:
+        description: "Extra env lines appended to <workspace>/.env.local after setup (e.g. per-run URL overrides; .env.local outranks .env in Next.js)"
+        required: false
+        type: string
+        default: ""
+      runtime-env:
+        description: "Runtime env vars for the deployment (multiline KEY=VALUE). The .env file only exists at build time; serverless functions need runtime vars passed via `vercel deploy -e`"
+        required: false
+        type: string
+        default: ""
+      runtime-env-keys:
+        description: "Names of keys to lift from the prepared <workspace>/.env into deployment runtime env vars — secrets stay in 1Password and never appear in workflow files"
+        required: false
+        type: string
+        default: ""
+      upload-sentry-source-maps:
+        description: "Upload source maps using SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT from the infra vault (requires sentry-cli as a consumer devDependency)"
+        required: false
+        type: boolean
+        default: false
+      patch-root-directory:
+        description: |
+          TEMPORARY: patch .vercel/project.json with the workspace as rootDirectory, for Vercel
+          projects that predate the monorepo layout and have no Root Directory configured in the
+          dashboard. New projects should configure Root Directory in the dashboard and keep this off.
+        required: false
+        type: boolean
+        default: false
       prod:
         description: "Force a production build/deploy. Defaults to true when env == 'production'."
         required: false
@@ -70,12 +108,13 @@ jobs:
       deploymentUrl: ${{ steps.deploy.outputs.deploymentUrl }}
     env:
       VERCEL_SCOPE: ${{ inputs.vercel-scope }}
+      WORKSPACE: ${{ inputs.workspace }}
       ENABLE_EXPERIMENTAL_COREPACK: "1"
       PROD: ${{ (inputs.prod || inputs.env == 'production') && 'true' || 'false' }}
     steps:
-      # The only 1Password call in this workflow — see steps/credential-retrieval. Op:// format
-      # validation now lives there too, so this no longer needs its own copy of that regex. All
-      # three Vercel credentials come from the same vault, one item per name (see op-infra-vault).
+      # The only place 1Password is read in this workflow — see steps/credential-retrieval. All
+      # credentials come from the same vault, one item per name (see op-infra-vault). The Sentry
+      # refs resolve to empty strings unless source-map upload is requested.
       - name: Resolve Vercel credentials
         id: op
         uses: aragon/github-templates/steps/credential-retrieval@main
@@ -86,6 +125,9 @@ jobs:
             VERCEL_TOKEN=op://${{ inputs.op-infra-vault }}/VERCEL_TOKEN/credential
             VERCEL_ORG_ID=op://${{ inputs.op-infra-vault }}/VERCEL_ORG_ID/credential
             VERCEL_PROJECT_ID=op://${{ inputs.op-infra-vault }}/VERCEL_PROJECT_ID/credential
+            SENTRY_AUTH_TOKEN=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_AUTH_TOKEN/credential', inputs.op-infra-vault) || '' }}
+            SENTRY_ORG=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_ORG/credential', inputs.op-infra-vault) || '' }}
+            SENTRY_PROJECT=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_PROJECT/credential', inputs.op-infra-vault) || '' }}
 
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
@@ -94,6 +136,7 @@ jobs:
 
       - name: Run setup command
         if: inputs.setup-command != ''
+        working-directory: ${{ inputs.workspace }}
         run: ${{ inputs.setup-command }}
 
       - name: Load environment secrets into .env
@@ -102,11 +145,50 @@ jobs:
         with:
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           op-vault: ${{ inputs.op-env-vault }}
-          secret-filepath: ".env"
+          secret-filepath: "${{ inputs.workspace }}/.env"
           mode: alltofile
 
-      - name: Build & deploy to Vercel
-        id: deploy
+      # Overrides must land in .env.local, not .env: setup commands typically write per-env config
+      # to .env.local, which e.g. Next.js loads at higher precedence than .env. Appending an
+      # override for the same key to .env would be silently shadowed; appending to .env.local
+      # (last occurrence wins within the file) lets the per-run value take effect.
+      - name: Apply env overrides
+        if: inputs.env-overrides != ''
+        env:
+          ENV_OVERRIDES: ${{ inputs.env-overrides }}
+        run: printf '%s\n' "$ENV_OVERRIDES" >> "$WORKSPACE/.env.local"
+
+      # Workspace packages that ship a built `dist/` must be compiled before `vercel build`: the
+      # lambda resolves them via package.json exports, and Node cannot execute the TypeScript
+      # source under packages/*/src. The `{dir}^...` filter selects only the dependencies of the
+      # workspace (never the workspace itself) and is a no-op for workspaces without buildable deps.
+      - name: Build workspace dependencies
+        if: inputs.workspace != '.'
+        run: pnpm --filter "{$WORKSPACE}^..." build
+
+      # Vercel never builds from git here: the artifact is built in this job and uploaded as-is
+      # (deploy --prebuilt). All vercel commands run from the repo root so bundlers treat the pnpm
+      # workspace root as the build root (pnpm symlinks point outside the workspace); project
+      # linking comes from VERCEL_ORG_ID/VERCEL_PROJECT_ID, independent of cwd.
+      - name: Pull Vercel project settings
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          VERCEL_ENV="preview"
+          if [ "$PROD" = "true" ]; then VERCEL_ENV="production"; fi
+          pnpm vercel pull --yes --environment="$VERCEL_ENV" --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+
+      - name: Set Vercel root directory
+        if: inputs.patch-root-directory
+        run: |
+          set -euo pipefail
+          jq --arg dir "$WORKSPACE" '.settings.rootDirectory = $dir' .vercel/project.json > .vercel/project.json.tmp
+          mv .vercel/project.json.tmp .vercel/project.json
+
+      - name: Bundle Vercel application
         env:
           VERCEL_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_ORG_ID }}
@@ -115,10 +197,77 @@ jobs:
           set -euo pipefail
           PROD_ARG=""
           if [ "$PROD" = "true" ]; then PROD_ARG="--prod"; fi
-          pnpm vercel build $PROD_ARG --yes --scope "$VERCEL_SCOPE"
+          pnpm vercel build $PROD_ARG --yes --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+
+      - name: Upload source maps to Sentry
+        if: inputs.upload-sentry-source-maps
+        env:
+          SENTRY_AUTH_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ fromJSON(steps.op.outputs.secrets).SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ fromJSON(steps.op.outputs.secrets).SENTRY_PROJECT }}
+        run: |
+          set -euo pipefail
+          : "${SENTRY_AUTH_TOKEN:?SENTRY_AUTH_TOKEN is required in the infra vault}"
+          : "${SENTRY_ORG:?SENTRY_ORG is required in the infra vault}"
+          : "${SENTRY_PROJECT:?SENTRY_PROJECT is required in the infra vault}"
+          release=$(git rev-parse HEAD)
+          pnpm --dir "$WORKSPACE" exec sentry-cli sourcemaps inject "${GITHUB_WORKSPACE}/.vercel/output"
+          pnpm --dir "$WORKSPACE" exec sentry-cli sourcemaps upload --release "$release" --validate --wait "${GITHUB_WORKSPACE}/.vercel/output"
+
+      # The runtime `-e KEY=VALUE` args are built as a bash array in the same step (arrays don't
+      # survive GITHUB_ENV) so values containing spaces stay single arguments: the .env file
+      # prepared above only exists at build time, so anything a serverless function needs at
+      # runtime must be set as deployment env vars. Literal values come from `runtime-env`;
+      # `runtime-env-keys` lifts the named keys (1Password secrets) from the prepared .env,
+      # keeping values out of workflow files.
+      - name: Deploy to Vercel
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_PROJECT_ID }}
+          RUNTIME_ENV: ${{ inputs.runtime-env }}
+          RUNTIME_ENV_KEYS: ${{ inputs.runtime-env-keys }}
+          UPLOAD_SENTRY_SOURCE_MAPS: ${{ inputs.upload-sentry-source-maps }}
+        run: |
+          set -euo pipefail
+          runtime_args=()
+          if [ "$UPLOAD_SENTRY_SOURCE_MAPS" = "true" ]; then
+            runtime_args+=(-e "SENTRY_RELEASE=$(git rev-parse HEAD)")
+          fi
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            runtime_args+=(-e "$line")
+          done <<< "$RUNTIME_ENV"
+          if [ -n "$RUNTIME_ENV_KEYS" ] && [ ! -f "$WORKSPACE/.env" ]; then
+            echo "::error::runtime-env-keys set but $WORKSPACE/.env does not exist (op-env-vault or setup-command must create it)" >&2
+            exit 1
+          fi
+          for key in $RUNTIME_ENV_KEYS; do
+            # The key is interpolated into an extended regex below — restrict it to plain env-var
+            # names so no character can act as a regex metacharacter (a key like MY.KEY would
+            # otherwise match MY_KEY/MYXKEY and lift the wrong value).
+            if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "::error::runtime-env-keys entry '$key' is not a valid env var name" >&2
+              exit 1
+            fi
+            # Tolerate optional whitespace around '=' and at the end of the line — dotenv parsers
+            # accept `KEY = value`, so a hand-edited config entry must not be silently skipped by
+            # the runtime lift (and trailing whitespace must not defeat the quote stripping below).
+            value=$({ grep -E "^[[:space:]]*${key}[[:space:]]*=" "$WORKSPACE/.env" || true; } | head -1 | cut -d= -f2- | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+            value="${value%\"}"
+            value="${value#\"}"
+            if [ -n "$value" ]; then
+              runtime_args+=(-e "${key}=${value}")
+            fi
+          done
+          PROD_ARG=""
           SKIP_DOMAIN=""
-          if [ "$PROD" = "true" ]; then SKIP_DOMAIN="--skip-domain"; fi
-          URL="$(pnpm vercel deploy --prebuilt $PROD_ARG $SKIP_DOMAIN --yes --scope "$VERCEL_SCOPE")"
+          if [ "$PROD" = "true" ]; then
+            PROD_ARG="--prod"
+            SKIP_DOMAIN="--skip-domain"
+          fi
+          URL="$(pnpm vercel deploy --prebuilt $PROD_ARG $SKIP_DOMAIN ${runtime_args[@]+"${runtime_args[@]}"} --yes --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE")"
           echo "deploymentUrl=$URL" >> "$GITHUB_OUTPUT"
 
       - name: Alias deployment to domain
@@ -129,4 +278,4 @@ jobs:
           VERCEL_PROJECT_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_PROJECT_ID }}
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.deploymentUrl }}
           DOMAIN: ${{ inputs.domain }}
-        run: pnpm vercel alias "$DEPLOYMENT_URL" "$DOMAIN" --scope "$VERCEL_SCOPE"
+        run: pnpm vercel alias "$DEPLOYMENT_URL" "$DOMAIN" --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"

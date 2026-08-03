@@ -18,48 +18,39 @@ name: "Credential Retrieval"
 description: "Single entry point for every 1Password interaction: bulk vault -> env/file, or named op:// references -> a JSON output."
 
 inputs:
+  # NOTE: composite-action inputs support no `type:`/`options:` metadata (that is
+  # workflow_dispatch syntax) — allowed values are documented here and validated in the steps.
   mode:
     description: |
+      One of: alltoenv | alltofile | byref.
       - byref:     resolve named `op://` references passed in `secret-refs` (see that input for the
         format). Use this instead of calling `1password/load-secrets-action` directly.
       - alltoenv:  load every item in `op-vault` and set them as MASKED GitHub env vars.
       - alltofile: load every item in `op-vault` and append them to `secret-filepath`.
     required: false
-    type: choice
     default: "alltoenv"
-    options:
-      - alltoenv
-      - alltofile
-      - byref
 
   secret-filepath:
     description: |
       'alltofile' only. Filepath where secrets will be downloaded. Secrets are appended to the end
       of the file.
     required: false
-    type: string
     default: ".env"
 
   file-format:
     description: |
-      'alltofile' only. Format of the output file.
-      - env: Uses the format VARNAME=VARVALUE
+      'alltofile' only. Format of the output file. Only 'env' is supported (VARNAME=VARVALUE).
     required: false
-    type: choice
     default: "env"
-    options:
-      - env
 
   # OP values
   op-token:
     description: "1Password service account token. Always required — every mode authenticates the CLI with it."
     required: true
-    type: string
 
   op-vault:
     description: "1Password vault to bulk-load from. Required for 'alltoenv' / 'alltofile'; unused by 'byref' (each entry in secret-refs carries its own vault)."
     required: false
-    type: string
     default: ""
 
   secret-refs:
@@ -76,7 +67,6 @@ inputs:
       with no '=' at all is a malformed entry and fails the step (this is NOT the same as an empty
       ref — it usually means a caller forgot to append `=${{ inputs.op-foo-path }}`).
     required: false
-    type: string
     default: ""
 
 outputs:

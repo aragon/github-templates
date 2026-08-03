@@ -27,6 +27,8 @@ jobs:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
   # On merge of a release/* PR into main: tag + GitHub Release (the only tagging point).
+  # `sha: head.sha` tags the staging-TESTED commit (recommended); use merge_commit_sha instead
+  # when the repo squash-merges and the head commit never lands on main.
   finalize:
     if: >
       github.event_name == 'pull_request'
@@ -34,8 +36,9 @@ jobs:
       && startsWith(github.event.pull_request.head.ref, 'release/')
     uses: aragon/github-templates/.github/workflows/release-finalize.yml@main
     with:
-      merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
+      sha: ${{ github.event.pull_request.head.sha }}
       pr-body: ${{ github.event.pull_request.body }}
+      changesets-guard: all
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
       op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
       op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential

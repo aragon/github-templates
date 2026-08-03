@@ -43,11 +43,16 @@ engines and both deploy targets, so the modules can be designed and dogfooded fr
 ### A — Frontend app on Vercel (`app`)
 Build → Test (unit + Playwright smoke + build-verification) → Release (**Changesets**, tag created only
 on release-PR merge) → Deploy (**Vercel**, multi-env: preview/dev/staging/prod, staging gate, hotfix,
-rollback). The richest scenario and the Changesets + Vercel reference.
+rollback). The richest scenario and the Changesets + Vercel reference. `app` is a **pnpm monorepo**
+(`apps/app`, `apps/assistant`, `packages/*`): each workspace releases independently through the same
+flow, with per-package tags (`@aragon/app@1.2.3`), release scopes (which packages version together) and
+per-workspace deploys — the reference for seam 3 below.
 
 ### B — npm library (`gov-ui-kit`, `aragon-domain` — identical to each other)
 Build → Test → Release (**Changesets** + GitHub Release) → Deploy = **npm publish via OIDC trusted
-publisher** (no `NPM_TOKEN`). `gov-ui-kit` additionally deploys Storybook to Vercel.
+publisher** (no `NPM_TOKEN`). `gov-ui-kit` additionally deploys Storybook to Vercel. Both repos are
+single-package today and expected to migrate to monorepos while still importing these workflows — the
+migration must be an input diff (seam 3), not a rewiring.
 
 ### C — Backend service (`app-backend`)
 Build (Docker) → Test (unit + integration via docker-compose + SCA/Trivy) → Release
@@ -71,11 +76,11 @@ Everything common is shared; what genuinely differs per scenario is **(a) the ve
 
 ---
 
-## 3. The two seams that differ (and how they're abstracted)
+## 3. The three seams that differ (and how they're abstracted)
 
 The release *orchestration* (guard one-active-release → cut branch → bump+changelog → summary → open PR
-→ Slack thread → tag only on merge → GitHub Release → deploy) is **identical** across scenarios. Only two
-adjacent things vary:
+→ Slack thread → tag only on merge → GitHub Release → deploy) is **identical** across scenarios. Only
+three adjacent things vary:
 
 **Seam 1 — version engine.** Changesets (A/B) vs semantic-release (C). Encapsulated in one composite
 action `steps/compute-version` with input `engine: changesets | semantic-release`. It computes the next
@@ -85,6 +90,28 @@ engine ran. Adding a third engine later = one branch in one action.
 **Seam 2 — deploy target.** Vercel (A/B) vs Docker-over-SSH (C) vs npm-OIDC (B). Each is its own reusable
 workflow (`deploy-vercel.yml`, `deploy-docker.yml`, npm publish stays a thin repo job because OIDC must
 run in the repo's own trust context). A repo's release workflow calls the deploy module that fits it.
+
+**Seam 3 — package location & repo shape.** Single package at the repo root (B/C, `v1.2.3` tags) vs a
+pnpm-workspace package (A, `@aragon/app@1.2.3` tags, several release lineages in one repo). Every
+release/deploy module defaults to the single-package shape and takes the monorepo as inputs:
+
+- `package-dir` — the package whose version names the release (`.` vs `apps/app`); version, changelog
+  and tag all read from it.
+- `tag-prefix` — `v` vs `@aragon/app@`; also drives the summary's previous-release boundary detection.
+- `scope` — Changesets only: the set of packages one release flow versions together, named in the
+  consumer's `.github/release-scopes.yml` (a flat `scope: [package names]` map). The shared
+  `compute-version` action **inverts** the scope into `changeset version --ignore` flags against the
+  live workspace list, so a newly added package fails safe (stays unreleased until it joins a scope).
+  Consumers without a scopes file pass `ignore-packages` directly.
+- `release-branch-prefix` — namespaces branches and the one-active-release guard per lineage
+  (`release/` vs `release/app/`), so two lineages in one repo release independently.
+- `workspace` / `working-directory` (deploy-vercel / e2e) — which directory to deploy or test.
+- path filters for release summaries come from the consumer's `.github/filters.yml` (same flat map
+  shape), naming which paths belong to which workspace.
+
+The two mapper files (`release-scopes.yml`, `filters.yml`) are consumer-owned data; the shared modules
+ship the parser (a strict vendored flat-YAML subset in `lib/`) and the resolution logic. Monorepo
+semantic-release is explicitly out of scope (only Changesets repos are monorepos here).
 
 Repo-specific quirks that are **not** abstracted (they live in the consumer's thin caller as pre/post
 hooks, to keep module inputs small):
@@ -168,8 +195,10 @@ versus the per-repo originals, which assumed the script lived in the same checko
 |---|---|---|
 | `credential-retrieval` *(existing, extended)* | the only module that talks to 1Password: bulk vault → env/file, or named `op://` refs → JSON | `op-token`, `mode`, `op-vault` (bulk modes), `secret-refs` (`byref`) → `secrets` (JSON, `byref`) |
 | `setup` | checkout + pnpm + Node + install | `ref`, `node-version`, `registry-url` |
-| `compute-version` | next version + bump + changelog | `engine`, `prettier-changelog` → `version` |
-| `generate-release-summary` | git-log → categorised summary (+Linear) | `linear-api-token`, `base-ref`, `repo` → `summary` |
+| `compute-version` | next version + bump + changelog(s); scope→`--ignore` inversion in monorepos | `engine`, `package-dir`, `scope`/`ignore-packages`, `tag-prefix`, `prettier-changelog` → `version`, `released`, `tag` |
+| `generate-release-summary` | git-log → categorised summary (+Linear); per-package tag boundary + path filtering | `tag-glob`, `path-filter`/`path-patterns`, `linear-api-token`, `base-ref`, `repo` → `summary` |
+| `generate-version-summary` | per-package `## name@version` + CHANGELOG sections after `changeset version` | `scope`/`packages`/`package-dir` → `summary` |
+| `changesets-guard` | fail on pending changesets at the release commit (optionally scope-aware) | `scope`, `scopes-file` |
 | `read-changelog` | extract a version section | `version`, `path` → `changes` |
 | `build-release-notes` | notes file + `slack_ts` marker | `changes`, `slack-ts`, `path` → `path` |
 | `slack-notify` | post / thread / edit Slack message | `slack-bot-token`, `slack-channel-id`, `message`, `thread-ts`, `update-ts` → `ts` |
@@ -179,15 +208,21 @@ versus the per-repo originals, which assumed the script lived in the same checko
 | `gh-ensure-tag` | idempotent tag on SHA | `tag`, `sha`, `remote` → `created` |
 | `gh-ensure-release` | idempotent GitHub Release | `tag`, `title`, `notes-path`, `token` |
 | `git-ensure-branch` | idempotent branch from base | `branch`, `base-ref`, `remote` → `created` |
+| `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / body-file write | `pr-number`, `token` (+`body`) → `body` |
+
+Shared helpers live in `lib/` (`flatYaml`, `releaseScopes`, `changelog`, `output`) — required by the
+action scripts via their co-located paths, unit-tested with `node --test` (root `package.json` +
+`.github/workflows/ci.yml`). `lib/flatYaml` is a strict vendored parser for the one YAML shape the
+mapper files use; action scripts must not depend on consumer `node_modules`.
 
 ### `.github/workflows/` — reusable workflows (`workflow_call`)
 | Module | Purpose |
 |---|---|
-| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root |
-| `release-finalize.yml` | on release-PR merge: tag (the *only* tagging point) + GitHub Release + notify |
-| `deploy-vercel.yml` | Vercel build+deploy; `VERCEL_TOKEN` referenced only here; optional domain alias |
+| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root; monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages` |
+| `release-finalize.yml` | on release-PR merge: tag (the *only* tagging point) + GitHub Release + notify. The caller picks the tag target via `sha` — the PR head SHA (the staging-**tested** commit, recommended) or the merge SHA (linear-history repos); optional `changesets-guard` |
+| `deploy-vercel.yml` | Vercel build+deploy; `VERCEL_TOKEN` referenced only here; optional domain alias, `workspace` for monorepos, runtime env lifting, Sentry source maps |
 | `deploy-docker.yml` | build-on-server Docker-over-SSH deploy to an environment |
-| `e2e.yml` | Playwright smoke/BV runner + result parsing + report artifact |
+| `e2e.yml` | Playwright smoke/BV runner + result parsing + report artifact; `working-directory` for monorepos |
 | `release-self.yml` | github-templates' own semver + moving-major release (dogfood) |
 
 ### Other

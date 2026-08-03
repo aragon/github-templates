@@ -1,7 +1,11 @@
 # Reusable Release — Start. Engine-agnostic orchestration:
-#   guard one-active-release → compute version (pluggable engine) → cut release/<version> →
+#   guard one-active-release → compute version (pluggable engine) → cut the release branch →
 #   bump + changelog → release summary → open PR → start Slack thread.
 # Does NOT deploy and does NOT tag (release-finalize owns tagging on PR merge).
+#
+# Works for single-package repos with the defaults, and for pnpm monorepos via
+# package-dir / tag-prefix / scope / release-branch-prefix (e.g. 'apps/app', '@aragon/app@',
+# 'app', 'release/app/').
 #
 # Repo-specific policies (stale-lineage guard, DB-migration detection, hotfix specifics) belong in
 # the caller's thin wrapper, not here.
@@ -28,10 +32,80 @@ on:
         type: string
         default: main
       release-branch-prefix:
-        description: "Prefix for the release branch"
+        description: "Prefix for the release branch (monorepo lineages: 'release/app/')"
         required: false
         type: string
         default: "release/"
+      branch-suffix:
+        description: |
+          What follows the prefix in the release branch name: 'version' (release/1.2.3) or
+          'timestamp' (release/2026-01-16_12-00). Scoped monorepo releases where the named package
+          may not be bumped must use 'timestamp' — there may be no version to name the branch by.
+        required: false
+        type: string
+        default: "version"
+      package-dir:
+        description: "Directory of the package whose version names the release (monorepo: 'apps/app')"
+        required: false
+        type: string
+        default: "."
+      tag-prefix:
+        description: "Release tag prefix, threaded to compute-version and the summary boundary (monorepo: '@aragon/app@')"
+        required: false
+        type: string
+        default: "v"
+      scope:
+        description: "Changesets only: release scope name in the scopes file; other workspace packages are --ignore'd"
+        required: false
+        type: string
+        default: ""
+      scopes-file:
+        description: "Consumer-repo path to the package→release-scope mapper"
+        required: false
+        type: string
+        default: ".github/release-scopes.yml"
+      ignore-packages:
+        description: "Changesets only: newline-separated package names to --ignore (escape hatch instead of 'scope')"
+        required: false
+        type: string
+        default: ""
+      commit-message:
+        description: "Release commit message template; {tag} and {version} are substituted ({tag} falls back to the branch name when the named package was not bumped)"
+        required: false
+        type: string
+        default: "chore(release): {tag}"
+      on-active-release:
+        description: "'fail' the run when an active release PR exists, or 'skip' (green-exit with released=false)"
+        required: false
+        type: string
+        default: "fail"
+      summary-mode:
+        description: |
+          PR body style: 'history' (commit-log summary via generate-release-summary) or
+          'packages' (per-package CHANGELOG sections via generate-version-summary; changesets only).
+        required: false
+        type: string
+        default: "history"
+      summary-path-filter:
+        description: "history mode: named filter in the filters file restricting the summary to one workspace's paths"
+        required: false
+        type: string
+        default: ""
+      summary-filters-file:
+        description: "Consumer-repo path to the workspace→paths mapper (used with 'summary-path-filter')"
+        required: false
+        type: string
+        default: ".github/filters.yml"
+      git-user-name:
+        description: "Committer name when no GPG key is configured"
+        required: false
+        type: string
+        default: "github-actions[bot]"
+      git-user-email:
+        description: "Committer email when no GPG key is configured"
+        required: false
+        type: string
+        default: "41898282+github-actions[bot]@users.noreply.github.com"
       op-release-token-path:
         description: "1Password path to a GitHub PAT used for checkout + PR creation"
         required: true
@@ -70,6 +144,10 @@ on:
         value: ${{ jobs.start.outputs.version }}
       released:
         value: ${{ jobs.start.outputs.released }}
+      tag:
+        value: ${{ jobs.start.outputs.tag }}
+      branch:
+        value: ${{ jobs.start.outputs.branch }}
       pr-url:
         value: ${{ jobs.start.outputs.pr-url }}
       pr-number:
@@ -79,8 +157,10 @@ permissions:
   contents: write
   pull-requests: write
 
+# Scoped by branch prefix so independent release lineages in one repo (release/app/ vs
+# release/assistant/) do not serialize against each other.
 concurrency:
-  group: release-start-${{ github.repository }}
+  group: release-start-${{ github.repository }}-${{ inputs.release-branch-prefix }}
   cancel-in-progress: false
 
 jobs:
@@ -89,6 +169,8 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       released: ${{ steps.version.outputs.released }}
+      tag: ${{ steps.version.outputs.tag }}
+      branch: ${{ steps.branch.outputs.name }}
       pr-url: ${{ steps.pr.outputs.url }}
       pr-number: ${{ steps.pr.outputs.number }}
     steps:
@@ -117,21 +199,29 @@ jobs:
           fetch-depth: "0"
 
       - name: Guard — only one active release
+        id: guard
         env:
           GH_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
           TARGET_BRANCH: ${{ inputs.target-branch }}
           PREFIX: ${{ inputs.release-branch-prefix }}
+          ON_ACTIVE_RELEASE: ${{ inputs.on-active-release }}
         run: |
           set -euo pipefail
           OPEN=$(gh pr list --base "$TARGET_BRANCH" --state open --json headRefName \
             -q "[.[] | select(.headRefName | startswith(\"$PREFIX\"))] | length")
           if [ "${OPEN:-0}" -ne 0 ]; then
+            if [ "$ON_ACTIVE_RELEASE" = "skip" ]; then
+              echo "::notice::An active release PR already exists — skipping this run."
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "::error::An active release PR already exists — only one active release at a time." >&2
             exit 1
           fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       - name: Import GPG key
-        if: inputs.op-gpg-key-path != ''
+        if: ${{ steps.guard.outputs.proceed == 'true' && inputs.op-gpg-key-path != '' }}
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
           gpg_private_key: ${{ fromJSON(steps.op.outputs.secrets).GPG_PRIVATE_KEY }}
@@ -139,16 +229,34 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
+      # The GPG import configures the git identity from the key as a side effect; without a key
+      # the commit step would fail on a bare runner unless an identity is set explicitly.
+      - name: Configure git identity
+        if: ${{ steps.guard.outputs.proceed == 'true' && inputs.op-gpg-key-path == '' }}
+        env:
+          GIT_USER_NAME: ${{ inputs.git-user-name }}
+          GIT_USER_EMAIL: ${{ inputs.git-user-email }}
+        run: |
+          set -euo pipefail
+          git config user.name "$GIT_USER_NAME"
+          git config user.email "$GIT_USER_EMAIL"
+
       - name: Compute version
         id: version
+        if: steps.guard.outputs.proceed == 'true'
         uses: aragon/github-templates/steps/compute-version@main
         with:
           engine: ${{ inputs.engine }}
+          package-dir: ${{ inputs.package-dir }}
+          scope: ${{ inputs.scope }}
+          scopes-file: ${{ inputs.scopes-file }}
+          ignore-packages: ${{ inputs.ignore-packages }}
+          tag-prefix: ${{ inputs.tag-prefix }}
           base-branch: ${{ inputs.base-ref }}
           github-token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
       - name: Nothing to release
-        if: steps.version.outputs.released != 'true'
+        if: ${{ steps.guard.outputs.proceed == 'true' && steps.version.outputs.released != 'true' }}
         run: echo "::notice::No releasable changes — stopping without opening a release PR."
 
       - name: Create release branch
@@ -156,31 +264,88 @@ jobs:
         if: steps.version.outputs.released == 'true'
         env:
           PREFIX: ${{ inputs.release-branch-prefix }}
+          SUFFIX_MODE: ${{ inputs.branch-suffix }}
           VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          BR="${PREFIX}${VERSION}"
-          git checkout -b "$BR"
-          echo "name=$BR" >> "$GITHUB_OUTPUT"
+          case "$SUFFIX_MODE" in
+            version)
+              if [ -z "$VERSION" ]; then
+                echo "::error::branch-suffix 'version' needs a bumped package at package-dir — use 'timestamp' for scoped releases." >&2
+                exit 1
+              fi
+              BR="${PREFIX}${VERSION}"
+              ;;
+            timestamp)
+              BR="${PREFIX}$(date +'%Y-%m-%d_%H-%M')"
+              ;;
+            *)
+              echo "::error::Unknown branch-suffix '$SUFFIX_MODE' (expected 'version' or 'timestamp')" >&2
+              exit 1
+              ;;
+          esac
+          git checkout -B "$BR"
+          {
+            echo "name=$BR"
+            echo "label=${TAG:-$BR}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Generate release summary
-        id: summary
-        if: steps.version.outputs.released == 'true'
+        id: history-summary
+        if: ${{ steps.version.outputs.released == 'true' && inputs.summary-mode == 'history' }}
         uses: aragon/github-templates/steps/generate-release-summary@main
         with:
           linear-api-token: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_API_TOKEN }}
+          tag-glob: ${{ inputs.tag-prefix }}[0-9]*
+          path-filter: ${{ inputs.summary-path-filter }}
+          filters-file: ${{ inputs.summary-filters-file }}
+
+      - name: Generate version summary
+        id: packages-summary
+        if: ${{ steps.version.outputs.released == 'true' && inputs.summary-mode == 'packages' }}
+        uses: aragon/github-templates/steps/generate-version-summary@main
+        with:
+          scope: ${{ inputs.scope }}
+          scopes-file: ${{ inputs.scopes-file }}
+          package-dir: ${{ inputs.package-dir }}
 
       - name: Commit & push
         if: steps.version.outputs.released == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          LABEL: ${{ steps.branch.outputs.label }}
           BRANCH: ${{ steps.branch.outputs.name }}
+          COMMIT_TEMPLATE: ${{ inputs.commit-message }}
         run: |
           set -euo pipefail
-          # Only the release artifacts — never `git add -A` (would sweep scratch files).
-          git add package.json CHANGELOG.md
-          git commit -m "chore(release): ${VERSION}"
-          git push --force origin "$BRANCH"
+          # Stage only release artifacts — never a bare `git add -A` (would sweep scratch files).
+          # The '*'-pathspecs cross directory boundaries, covering monorepo packages/*/ bumps; the
+          # .changeset add stages the changesets consumed (deleted) by `changeset version` so they
+          # cannot merge back and re-release next cycle. Each pathspec is staged only when it has
+          # matches — `git add` hard-fails on an unmatched pathspec (e.g. no CHANGELOG yet).
+          stage() {
+            if [ -n "$(git status --porcelain -- "$@")" ]; then
+              git add -A -- "$@"
+            fi
+          }
+          stage '*package.json' ':(exclude)*node_modules*'
+          stage '*CHANGELOG.md' ':(exclude)*node_modules*'
+          stage 'pnpm-lock.yaml'
+          if [ -d .changeset ]; then
+            stage .changeset
+          fi
+          LEFTOVER="$(git status --porcelain | grep -v '^[MADRC] ' || true)"
+          if [ -n "$LEFTOVER" ]; then
+            echo "::warning::Unstaged changes left behind by the version engine (add their paths here if they belong in the release commit):" >&2
+            echo "$LEFTOVER" >&2
+          fi
+          MESSAGE="${COMMIT_TEMPLATE//\{tag\}/$LABEL}"
+          MESSAGE="${MESSAGE//\{version\}/$VERSION}"
+          git commit -m "$MESSAGE"
+          # force-with-lease: reruns may rewrite the branch, but a concurrently updated remote
+          # branch is never stomped.
+          git push --force-with-lease origin "$BRANCH"
 
       - name: Open release PR
         id: pr
@@ -189,30 +354,42 @@ jobs:
         with:
           base: ${{ inputs.target-branch }}
           head: ${{ steps.branch.outputs.name }}
-          title: "Release v${{ steps.version.outputs.version }}"
-          body: ${{ steps.summary.outputs.summary }}
+          title: "Release ${{ steps.branch.outputs.label }}"
+          body: ${{ steps.history-summary.outputs.summary || steps.packages-summary.outputs.summary }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
+      # Ceremony steps must not fail a release that is already cut — hence continue-on-error.
       - name: Notify Slack — release started
         id: slack
         if: ${{ steps.version.outputs.released == 'true' && inputs.op-slack-bot-token-path != '' }}
+        continue-on-error: true
         uses: aragon/github-templates/steps/slack-notify@main
         with:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           message: |
-            :rocket: *Release v${{ steps.version.outputs.version }} started*
+            :rocket: *Release ${{ steps.branch.outputs.label }} started*
             *PR:* ${{ steps.pr.outputs.url }}
             Branch: `${{ steps.branch.outputs.name }}` · by ${{ github.actor }}
 
-      - name: Persist Slack thread marker on PR
+      - name: Read PR body
+        id: pr-body
         if: ${{ steps.slack.outputs.ts != '' }}
-        env:
-          GH_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          SLACK_TS: ${{ steps.slack.outputs.ts }}
-        run: |
-          set -euo pipefail
-          BODY="$(gh pr view "$PR_NUMBER" --json body -q .body)"
-          printf '%s\n\n<!-- slack_ts: %s -->\n' "$BODY" "$SLACK_TS" > body.md
-          gh pr edit "$PR_NUMBER" --body-file body.md
+        continue-on-error: true
+        uses: aragon/github-templates/steps/gh-pr-get-body@main
+        with:
+          pr-number: ${{ steps.pr.outputs.number }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
+
+      # The marker lets downstream flows (release-finalize, cancel) thread their Slack updates.
+      - name: Persist Slack thread marker on PR
+        if: ${{ steps.pr-body.outcome == 'success' && steps.slack.outputs.ts != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/gh-pr-edit-body@main
+        with:
+          pr-number: ${{ steps.pr.outputs.number }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
+          body: |
+            ${{ steps.pr-body.outputs.body }}
+
+            <!-- slack_ts: ${{ steps.slack.outputs.ts }} -->

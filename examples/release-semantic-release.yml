@@ -35,7 +35,8 @@ jobs:
           || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
     uses: aragon/github-templates/.github/workflows/release-finalize.yml@main
     with:
-      merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
+      # Backend policy: tag the merge commit (linear history via back-merge).
+      sha: ${{ github.event.pull_request.merge_commit_sha }}
       pr-body: ${{ github.event.pull_request.body }}
       op-release-token-path: op://kv_backend2_infra/ARABOT_APP_BACKEND_RELEASES/credential
       op-slack-bot-token-path: op://kv_backend2_infra/SLACK_BOT_TOKEN/credential

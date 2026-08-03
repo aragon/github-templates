@@ -1,5 +1,8 @@
 # Reusable E2E workflow — runs Playwright tests (smoke or build-verification) against a deployed URL.
 #
+# Works for single-package repos with the defaults, and for monorepos via 'working-directory'
+# (e.g. 'apps/app' — scripts, results and report paths all resolve inside it).
+#
 # SELF-REFERENCE NOTE: composite actions are referenced as `aragon/github-templates/steps/*@main`
 # because a relative `./steps/*` inside a reusable workflow would resolve against the CALLER repo,
 # not this one. `@main` is the bootstrap default — `release-self` + Dependabot pin these to the cut
@@ -23,6 +26,31 @@ on:
         required: false
         type: string
         default: smoke
+      working-directory:
+        description: "Directory holding the e2e setup (monorepo: 'apps/app'); '.' = single-package repo"
+        required: false
+        type: string
+        default: "."
+      install-command:
+        description: "Command installing the Playwright browsers (run in working-directory)"
+        required: false
+        type: string
+        default: "pnpm e2e:install"
+      test-command:
+        description: "Command running the tests (run in working-directory); empty = 'pnpm e2e:<mode>'"
+        required: false
+        type: string
+        default: ""
+      results-path:
+        description: "Playwright JSON results file; empty = <working-directory>/e2e/test-results/results.json"
+        required: false
+        type: string
+        default: ""
+      report-path:
+        description: "Playwright HTML report directory; empty = <working-directory>/e2e/playwright-report"
+        required: false
+        type: string
+        default: ""
       timeout-minutes:
         description: "Job timeout"
         required: false
@@ -65,6 +93,7 @@ jobs:
 
       - name: Get Playwright version
         id: pw-version
+        working-directory: ${{ inputs.working-directory }}
         run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright browsers
@@ -76,10 +105,12 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: pnpm e2e:install
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.install-command }}
 
       - name: Install Playwright OS deps
         if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: ${{ inputs.working-directory }}
         run: pnpm exec playwright install-deps chromium
 
       - name: Warmup deployment
@@ -97,6 +128,7 @@ jobs:
       - name: Run tests
         id: tests
         continue-on-error: true
+        working-directory: ${{ inputs.working-directory }}
         env:
           E2E_BASE_URL: ${{ inputs.deployment-url }}
           MODE: ${{ inputs.mode }}
@@ -106,14 +138,14 @@ jobs:
             smoke|bv) ;;
             *) echo "::error::mode must be 'smoke' or 'bv', got '$MODE'"; exit 1 ;;
           esac
-          pnpm "e2e:$MODE"
+          ${{ inputs.test-command != '' && inputs.test-command || 'pnpm "e2e:$MODE"' }}
 
       - name: Parse Playwright results
         id: playwright-result
         if: always()
         uses: aragon/github-templates/steps/parse-playwright-results@main
         with:
-          report-path: e2e/test-results/results.json
+          report-path: ${{ inputs.results-path != '' && inputs.results-path || format('{0}/e2e/test-results/results.json', inputs.working-directory) }}
           step-outcome: ${{ steps.tests.outcome }}
 
       - name: Upload HTML report
@@ -122,12 +154,13 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report-${{ inputs.environment }}
-          path: e2e/playwright-report/
+          path: ${{ inputs.report-path != '' && inputs.report-path || format('{0}/e2e/playwright-report/', inputs.working-directory) }}
           retention-days: 14
 
       - name: Add report link to job summary
         if: always()
         env:
+          MODE: ${{ inputs.mode }}
           ENVIRONMENT: ${{ inputs.environment }}
           RESULT_LABEL: ${{ steps.playwright-result.outputs.result_label }}
           RESULT_SUMMARY: ${{ steps.playwright-result.outputs.summary }}
@@ -135,7 +168,7 @@ jobs:
           ARTIFACT_VIEWER_HOST: ${{ inputs.artifact-viewer-host }}
         run: |
           {
-            echo "### 🎭 Playwright ${{ inputs.mode }} report"
+            echo "### 🎭 Playwright ${MODE} report"
             echo ""
             echo "| | |"
             echo "|---|---|"
@@ -152,5 +185,5 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-traces-${{ inputs.environment }}
-          path: e2e/test-results/
+          path: ${{ format('{0}/e2e/test-results/', inputs.working-directory) }}
           retention-days: 7

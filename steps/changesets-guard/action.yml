@@ -1,0 +1,27 @@
+name: Changesets Guard
+description: |
+  Fails when pending .changeset/*.md files are still present — someone added a changeset after
+  `changeset version` consumed the batch, so the release commit would ship an unreleased entry.
+  Run it at the release (tested) commit before tagging. With 'scope', only changesets naming an
+  in-scope package trip the guard: other release lineages' changesets are expected to be present.
+
+inputs:
+  scope:
+    description: "Release scope name in the scopes file; empty = any pending changeset fails the guard"
+    required: false
+    default: ""
+  scopes-file:
+    description: "Consumer-repo path to the package→release-scope mapper (used with 'scope')"
+    required: false
+    default: ".github/release-scopes.yml"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SCOPE: ${{ inputs.scope }}
+        SCOPES_FILE: ${{ inputs.scopes-file }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/changesetsGuard.js"

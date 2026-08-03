@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5b9c53b9bfe9bc94bfba6e6989ac4d3e7 # v7.0.1
+
+      - uses: actions/setup-node@8207627849ba7fea6b85e0f8335b8f0e4b590a97 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Syntax-check action scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find lib steps -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Unit tests
+        run: node --test 'lib/*.test.js' 'steps/**/*.test.js'

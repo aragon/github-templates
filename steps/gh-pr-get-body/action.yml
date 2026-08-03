@@ -1,0 +1,38 @@
+name: GitHub PR Get Body
+description: Reads a PR body via gh (heredoc-safe output).
+
+inputs:
+  pr-number:
+    description: Pull request number
+    required: true
+  token:
+    description: GitHub token (PAT recommended)
+    required: true
+
+outputs:
+  body:
+    description: PR body
+    value: ${{ steps.get.outputs.body }}
+
+runs:
+  using: composite
+  steps:
+    - id: get
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        BODY="$(gh pr view "$PR_NUMBER" --json body -q .body)"
+        # Random heredoc delimiter so a body can never terminate its own block early.
+        DELIMITER="EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+        if grep -qF "$DELIMITER" <<< "$BODY"; then
+          echo "::error::PR body collides with the output delimiter" >&2
+          exit 1
+        fi
+        {
+          echo "body<<$DELIMITER"
+          echo "$BODY"
+          echo "$DELIMITER"
+        } >> "$GITHUB_OUTPUT"

@@ -11,6 +11,12 @@ centralise secret handling, restrict access to sensitive tokens (e.g. Vercel), a
 
 - **`steps/`** — composite actions (step-level building blocks).
 - **`.github/workflows/`** — reusable workflows (`workflow_call`, job-level).
+- **`lib/`** — shared helpers used by the action scripts (unit-tested; zero runtime dependencies).
+
+Every release/deploy module works for a **single-package repo with the defaults** and for a
+**pnpm monorepo via inputs** (`package-dir`, `tag-prefix`, `scope`, `workspace`, …) — see
+[`docs/release-design.md §3`](docs/release-design.md) seam 3 and
+[`examples/release-changesets-monorepo.yml`](examples/release-changesets-monorepo.yml).
 
 ### Composite actions (`steps/`)
 
@@ -18,8 +24,10 @@ centralise secret handling, restrict access to sensitive tokens (e.g. Vercel), a
 |--------|---------|
 | `credential-retrieval` | the only place this repo talks to 1Password: bulk-load a vault into env vars/a file, or resolve named `op://` references (`mode: byref`) |
 | `setup` | checkout + pnpm + Node + install |
-| `compute-version` | next version + bump + CHANGELOG — engine: `changesets` or `semantic-release` |
-| `generate-release-summary` | git-log → categorised summary (optional Linear enrichment) |
+| `compute-version` | next version + bump + CHANGELOG — engine: `changesets` or `semantic-release`; monorepo release scopes via `scope` → `changeset version --ignore` inversion |
+| `generate-release-summary` | git-log → categorised summary (optional Linear enrichment); `tag-glob` boundary + optional per-workspace path filtering |
+| `generate-version-summary` | per-package `## name@version` + CHANGELOG sections after `changeset version` |
+| `changesets-guard` | fail on pending changesets at the release commit (optionally scope-aware) |
 | `read-changelog` | extract a version's section from CHANGELOG.md |
 | `build-release-notes` | release-notes file + Slack thread marker |
 | `slack-notify` | post / thread / edit a Slack message |
@@ -27,16 +35,17 @@ centralise secret handling, restrict access to sensitive tokens (e.g. Vercel), a
 | `parse-playwright-results` | classify a Playwright JSON report |
 | `gh-ensure-pr` / `gh-ensure-tag` / `gh-ensure-release` | idempotent PR / tag / release |
 | `git-ensure-branch` | idempotent branch from a base ref |
+| `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / write |
 
 ### Reusable workflows (`.github/workflows/`)
 
 | Workflow | Purpose |
 |----------|---------|
-| `release-start.yml` | guard → compute version → cut `release/<v>` → summary → open PR → Slack thread |
-| `release-finalize.yml` | on release-PR merge: tag (the only tagging point) + GitHub Release |
-| `deploy-vercel.yml` | Vercel build + deploy (token resolved only here) |
+| `release-start.yml` | guard → compute version → cut the release branch → summary → open PR → Slack thread |
+| `release-finalize.yml` | on release-PR merge: tag (the only tagging point) + GitHub Release — the caller picks the tag target (`sha`: tested head vs merge commit) |
+| `deploy-vercel.yml` | Vercel build + deploy (token resolved only here); monorepo `workspace`, runtime env lifting, optional Sentry source maps |
 | `deploy-docker.yml` | build-on-server Docker deploy over SSH |
-| `e2e.yml` | Playwright smoke / build-verification runner |
+| `e2e.yml` | Playwright smoke / build-verification runner (`working-directory` for monorepos) |
 | `release-self.yml` | this repo's own release (semver tag + moving major) |
 
 ## Using a module
@@ -74,6 +83,9 @@ every reusable workflow now uses instead of calling `1password/load-secrets-acti
 
 ## Developing
 
+- `node --test 'lib/*.test.js' 'steps/**/*.test.js'` runs the unit tests for the action scripts
+  and `lib/` helpers (also run by `.github/workflows/ci.yml` on every PR). No install needed —
+  the scripts must stay dependency-free to run on a bare runner.
 - Run **Self-test (steps)** (`.github/workflows/_selftest.yml`, manual dispatch) to smoke-test the
   leaf actions.
 - Inside a **reusable workflow**, reference composite actions by their **fully-qualified** path
