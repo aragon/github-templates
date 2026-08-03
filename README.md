@@ -34,7 +34,7 @@ Every release/deploy module works for a **single-package repo with the defaults*
 | `extract-slack-ts` | parse the `<!-- slack_ts -->` marker from text |
 | `parse-playwright-results` | classify a Playwright JSON report |
 | `gh-ensure-pr` / `gh-ensure-tag` / `gh-ensure-release` | idempotent PR / tag / release |
-| `git-ensure-branch` | idempotent branch from a base ref |
+| `git-ensure-branch` | idempotent branch from a base ref — for consumer flows only (`release-start.yml` names its branch inline); a hotfix flow, which stays in the consumer, is the caller |
 | `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / write |
 
 ### Reusable workflows (`.github/workflows/`)

@@ -24,15 +24,6 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../lib/gha.sh"
         BODY="$(gh pr view "$PR_NUMBER" --json body -q .body)"
-        # Random heredoc delimiter so a body can never terminate its own block early.
-        DELIMITER="EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-        if grep -qF "$DELIMITER" <<< "$BODY"; then
-          echo "::error::PR body collides with the output delimiter" >&2
-          exit 1
-        fi
-        {
-          echo "body<<$DELIMITER"
-          echo "$BODY"
-          echo "$DELIMITER"
-        } >> "$GITHUB_OUTPUT"
+        gha_set_multiline "$GITHUB_OUTPUT" body "$BODY"

@@ -1,3 +1,6 @@
+# Consumer-facing leaf: no reusable workflow here calls it (release-start.yml derives its branch
+# name inline from version/timestamp). It exists for the flows that stay in the consumer repo —
+# hotfix start, in particular — so those do not keep a per-repo copy after migrating.
 name: Ensure Branch
 description: Ensures a remote branch exists, created from a base ref if missing (idempotent).
 

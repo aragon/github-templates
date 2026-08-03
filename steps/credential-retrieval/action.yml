@@ -1,18 +1,14 @@
-# The ONLY place in this repo that talks to 1Password. Every other composite action and reusable
-# workflow that needs a secret calls this action instead of installing the CLI or invoking a
-# 1Password action directly — that is what "centralized" means here: one action owns the CLI
-# install, the `op` invocations, output masking, and `op://` reference validation.
+# The ONLY place in this repo that talks to 1Password: one action owns the CLI install, the `op`
+# invocations, output masking and `op://` reference validation.
 #
 # Pick a mode:
 #   - byref:     resolve a short list of NAMED secrets, each from its own `op://vault/item/field`
-#                reference. This is the mode almost every consumer wants (a GitHub PAT, a Slack
-#                token, an SSH key, ...) and replaces calling `1password/load-secrets-action`
-#                directly. Outputs a single JSON blob (see `outputs.secrets` below) so secret
-#                values never touch $GITHUB_ENV / the process environment of later steps — only
-#                the step(s) that explicitly read a field via fromJSON() see it.
+#                reference (a GitHub PAT, a Slack token, an SSH key, ...). Outputs one JSON blob
+#                (see `outputs.secrets`), so values never reach $GITHUB_ENV or the environment of
+#                later steps — only a step that reads a field via fromJSON() sees it.
 #   - alltoenv:  bulk-load every "API Credential" item in one vault as MASKED env vars (var name =
-#                item title). Broad, job-wide exposure by design — only use for genuinely bulk
-#                secret needs (e.g. materialising a full app .env).
+#                item title). Broad, job-wide exposure by design — only for genuinely bulk secret
+#                needs (e.g. materialising a full app .env).
 #   - alltofile: same bulk load as alltoenv, appended to a file instead of $GITHUB_ENV.
 name: "Credential Retrieval"
 description: "Single entry point for every 1Password interaction: bulk vault -> env/file, or named op:// references -> a JSON output."
@@ -24,7 +20,7 @@ inputs:
     description: |
       One of: alltoenv | alltofile | byref.
       - byref:     resolve named `op://` references passed in `secret-refs` (see that input for the
-        format). Use this instead of calling `1password/load-secrets-action` directly.
+        format).
       - alltoenv:  load every item in `op-vault` and set them as MASKED GitHub env vars.
       - alltofile: load every item in `op-vault` and append them to `secret-filepath`.
     required: false
@@ -122,15 +118,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # ::add-mask:: only masks the exact line it's given — a value with embedded newlines (a
-        # multi-line credential) needs one call per line, or every line after the first leaks in
-        # cleartext in the job log.
-        mask_multiline() {
-          local val="$1" line
-          while IFS= read -r line || [[ -n "$line" ]]; do
-            [[ -n "$line" ]] && echo "::add-mask::$line"
-          done <<< "$val"
-        }
+        . "$GITHUB_ACTION_PATH/../../lib/gha.sh"
         number_entries=0
         if [[ -f op_list.json ]]; then
           number_entries=$(jq length op_list.json)
@@ -147,15 +135,8 @@ runs:
             continue
           fi
           item_credential=$(op read "op://${OP_VAULT}/${item_name}/credential")
-          mask_multiline "$item_credential"
-          # Multiline-safe $GITHUB_ENV form (GitHub's own delimiter syntax) — required so a
-          # credential value with an embedded newline can't inject an unrelated extra env var.
-          delim="ghaenv_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-          {
-            echo "${item_name}<<$delim"
-            echo "$item_credential"
-            echo "$delim"
-          } >> "$GITHUB_ENV"
+          gha_mask "$item_credential"
+          gha_set_multiline "$GITHUB_ENV" "$item_name" "$item_credential"
         done
         rm -f op_list.json
 
@@ -169,12 +150,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        mask_multiline() {
-          local val="$1" line
-          while IFS= read -r line || [[ -n "$line" ]]; do
-            [[ -n "$line" ]] && echo "::add-mask::$line"
-          done <<< "$val"
-        }
+        . "$GITHUB_ACTION_PATH/../../lib/gha.sh"
         number_entries=0
         if [[ -f op_list.json ]]; then
           number_entries=$(jq length op_list.json)
@@ -187,7 +163,7 @@ runs:
             continue
           fi
           item_credential=$(op read "op://${OP_VAULT}/${item_name}/credential")
-          mask_multiline "$item_credential"
+          gha_mask "$item_credential"
           case "$FILE_FORMAT" in
             env)
               # The flat VARNAME=VARVALUE format has no standard escaping for embedded newlines —
@@ -216,14 +192,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        mask_multiline() {
-          local val="$1" line
-          while IFS= read -r line || [[ -n "$line" ]]; do
-            [[ -n "$line" ]] && echo "::add-mask::$line"
-          done <<< "$val"
-        }
-        # Same op:// shape the reusable workflows used to each validate separately — centralized
-        # here now, so they no longer carry their own copy of this regex.
+        . "$GITHUB_ACTION_PATH/../../lib/gha.sh"
+        # The op:// reference shape, validated only here.
         NAME_RE='^[A-Za-z_][A-Za-z0-9_]*$'
         REF_RE='^op://[A-Za-z0-9 ._-]+/[A-Za-z0-9 ._-]+/[A-Za-z0-9 ._-]+$'
         json='{}'
@@ -250,15 +220,8 @@ runs:
             exit 1
           fi
           value="$(op read "$ref")"
-          mask_multiline "$value"
+          gha_mask "$value"
           json=$(jq -c --arg k "$name" --arg v "$value" '. + {($k): $v}' <<< "$json")
         done <<< "$SECRET_REFS"
 
-        # Random delimiter for the multiline GITHUB_OUTPUT write — a secret value that happened to
-        # contain a fixed delimiter string could otherwise inject extra output keys.
-        delim="ghadelim_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-        {
-          echo "secrets<<$delim"
-          echo "$json"
-          echo "$delim"
-        } >> "$GITHUB_OUTPUT"
+        gha_set_multiline "$GITHUB_OUTPUT" secrets "$json"

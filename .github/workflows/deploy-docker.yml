@@ -139,8 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
     steps:
-      # The only 1Password call in this workflow — see steps/credential-retrieval. Op:// format
-      # validation now lives there too, so this no longer needs its own copy of that regex.
+      # The only 1Password call in this workflow — see steps/credential-retrieval.
       - name: Resolve SSH credentials
         id: op
         uses: aragon/github-templates/steps/credential-retrieval@main

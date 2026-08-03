@@ -72,7 +72,11 @@ on:
         type: string
         default: ""
       extra-cache-key-files:
-        description: "File pattern(s) hashed into the extra cache key (hashFiles() syntax, comma-separated)"
+        description: |
+          Glob pattern(s) hashed into the extra cache key, NEWLINE-separated. hashFiles() joins its
+          arguments with a newline and @actions/glob splits on newlines, so a comma-separated string
+          is one pattern that matches nothing — which would silently freeze the cache key. Required
+          whenever 'extra-cache-path' is set.
         required: false
         type: string
         default: ""
@@ -140,6 +144,8 @@ jobs:
           secret-refs: ${{ inputs.env-secret-refs }}
 
       # Job-wide: test-runner configs read process.env. Already masked by credential-retrieval.
+      # The delimiter dance is lib/gha.sh's gha_set_multiline inlined: a reusable workflow runs in
+      # the CALLER's checkout, so it cannot source this repo's lib/ the way the composite actions do.
       - name: Export test env secrets
         if: inputs.env-secret-refs != ''
         env:
@@ -148,8 +154,7 @@ jobs:
           set -euo pipefail
           while IFS= read -r key; do
             value=$(jq -r --arg k "$key" '.[$k]' <<< "$SECRETS_JSON")
-            # Random delimiter: a value containing a fixed one could inject extra env vars.
-            delim="ghaenv_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+            delim="ghadelim_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
             {
               echo "${key}<<$delim"
               echo "$value"
@@ -179,6 +184,24 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: pnpm exec playwright install-deps chromium
 
+      # An unmatched pattern makes hashFiles() return an empty string, which turns the key below
+      # into a constant that never invalidates — fail instead of caching a stale asset forever.
+      - name: Validate extra cache key
+        if: inputs.extra-cache-path != ''
+        env:
+          KEY_FILES: ${{ inputs.extra-cache-key-files }}
+          KEY_HASH: ${{ hashFiles(inputs.extra-cache-key-files) }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY_FILES" ]; then
+            echo "::error::extra-cache-path requires extra-cache-key-files, or the cache key never invalidates" >&2
+            exit 1
+          fi
+          if [ -z "$KEY_HASH" ]; then
+            echo "::error::extra-cache-key-files matched no files. Patterns must be NEWLINE-separated: $KEY_FILES" >&2
+            exit 1
+          fi
+
       - name: Cache extra test assets
         id: extra-cache
         if: inputs.extra-cache-path != ''
@@ -187,20 +210,22 @@ jobs:
           path: ${{ inputs.extra-cache-path }}
           key: e2e-extra-${{ inputs.mode }}-${{ runner.os }}-${{ hashFiles(inputs.extra-cache-key-files) }}
 
-      # xvfb-run prefixes only the first command of a `&&` chain; wrap chains in `bash -c`.
       - name: Prepare test environment
         if: inputs.pre-test-command != ''
         working-directory: ${{ inputs.working-directory }}
         env:
           EXTRA_CACHE_HIT: ${{ steps.extra-cache.outputs.cache-hit == 'true' }}
           USE_XVFB: ${{ inputs.use-xvfb }}
+          PRE_TEST_COMMAND: ${{ inputs.pre-test-command }}
         run: |
           set -euo pipefail
-          PREFIX=""
+          # The command runs through `bash -c` so a `&&` chain stays intact: xvfb-run would
+          # otherwise wrap only the first command of the chain.
           if [ "$USE_XVFB" = "true" ]; then
-            PREFIX="xvfb-run --auto-servernum"
+            xvfb-run --auto-servernum bash -euo pipefail -c "$PRE_TEST_COMMAND"
+          else
+            bash -euo pipefail -c "$PRE_TEST_COMMAND"
           fi
-          $PREFIX ${{ inputs.pre-test-command }}
 
       - name: Warmup deployment
         env:
@@ -222,17 +247,21 @@ jobs:
           E2E_BASE_URL: ${{ inputs.deployment-url }}
           MODE: ${{ inputs.mode }}
           USE_XVFB: ${{ inputs.use-xvfb }}
+          TEST_COMMAND: ${{ inputs.test-command }}
         run: |
           set -euo pipefail
           case "$MODE" in
             smoke|bv) ;;
             *) echo "::error::mode must be 'smoke' or 'bv', got '$MODE'"; exit 1 ;;
           esac
-          PREFIX=""
+          CMD="$TEST_COMMAND"
+          if [ -z "$CMD" ]; then CMD="pnpm e2e:$MODE"; fi
+          # See "Prepare test environment" for why the command goes through `bash -c`.
           if [ "$USE_XVFB" = "true" ]; then
-            PREFIX="xvfb-run --auto-servernum"
+            xvfb-run --auto-servernum bash -euo pipefail -c "$CMD"
+          else
+            bash -euo pipefail -c "$CMD"
           fi
-          $PREFIX ${{ inputs.test-command != '' && inputs.test-command || 'pnpm "e2e:$MODE"' }}
 
       - name: Parse Playwright results
         id: playwright-result

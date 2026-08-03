@@ -23,6 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           find lib steps -name '*.js' -print0 | xargs -0 -n1 node --check
+          find lib steps -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
       - name: Unit tests
         run: node --test 'lib/*.test.js' 'steps/**/*.test.js'

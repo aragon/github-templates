@@ -64,6 +64,8 @@ const commitMatchesPathFilter = (commit, patterns, git = runGit) => {
             ? git(['show', '--pretty=format:', '--name-only', commit])
             : git(['diff', '--name-only', parents[0], commit]);
 
+    // path.matchesGlob needs Node >= 22.5 — fine on the setup action's default (24), but a
+    // consumer pointing node-version-file at an older runtime would break here.
     return files
         .split('\n')
         .filter(Boolean)

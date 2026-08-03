@@ -137,7 +137,7 @@ runs:
             fi
 
             BEFORE="$(read_version)"
-            pnpm changeset version ${IGNORE_FLAGS[@]+"${IGNORE_FLAGS[@]}"}
+            pnpm changeset version "${IGNORE_FLAGS[@]}"
             VERSION="$(read_version)"
 
             if [ "$PRETTIER_CHANGELOG" = "true" ]; then

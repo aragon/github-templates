@@ -214,10 +214,13 @@ versus the per-repo originals, which assumed the script lived in the same checko
 | `git-ensure-branch` | idempotent branch from base | `branch`, `base-ref`, `remote` → `created` |
 | `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / body-file write | `pr-number`, `token` (+`body`) → `body` |
 
-Shared helpers live in `lib/` (`flatYaml`, `releaseScopes`, `changelog`, `output`) — required by the
-action scripts via their co-located paths, unit-tested with `node --test` (root `package.json` +
-`.github/workflows/ci.yml`). `lib/flatYaml` is a strict vendored parser for the one YAML shape the
-mapper files use; action scripts must not depend on consumer `node_modules`.
+Shared helpers live in `lib/` (`flatYaml`, `releaseScopes`, `changelog`, `output`, `gha.sh`) —
+required by the action scripts via their co-located paths, unit-tested with `node --test` (root
+`package.json` + `.github/workflows/ci.yml`). `lib/flatYaml` is a strict vendored parser for the one
+YAML shape the mapper files use; action scripts must not depend on consumer `node_modules`.
+`lib/gha.sh` is the bash counterpart of `lib/output.js` for composite steps with no node process
+handy; a composite action reaches both via `$GITHUB_ACTION_PATH/../../lib/`, but a **reusable
+workflow** cannot (it runs in the caller's checkout), so the one such call site inlines it.
 
 ### `.github/workflows/` — reusable workflows (`workflow_call`)
 | Module | Purpose |
