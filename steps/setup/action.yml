@@ -17,6 +17,20 @@ inputs:
   ref:
     description: "The branch, tag or SHA to checkout."
     required: false
+  submodules:
+    description: "Pass-through to actions/checkout's `submodules` (false / true / recursive). A private submodule needs `token` (or `submodules-token`) to have read access to it."
+    required: false
+    default: "false"
+  submodules-token:
+    description: |
+      Optional dedicated token used ONLY to fetch submodules, via a per-command git credential that
+      is never written to any persisted git config — separate from `token`, which is used for the
+      main checkout. Use this when the submodule needs a token scoped differently than the main
+      repo's (e.g. a fine-grained PAT that can read only the submodule's repo, not this one). Leave
+      empty to fetch submodules with the same `token` as the main checkout (actions/checkout's
+      normal, built-in behavior).
+    required: false
+    default: ""
   allow-unsafe-pr-checkout:
     description: |
       Pass-through to actions/checkout's `allow-unsafe-pr-checkout`. Only set this to "true" if the
@@ -59,7 +73,35 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         token: ${{ inputs.token }}
         ref: ${{ inputs.ref }}
+        # When a dedicated submodules-token is given, skip actions/checkout's own submodule fetch
+        # here (it would use `token`, not `submodules-token`) — the next step does it instead.
+        submodules: ${{ inputs.submodules-token != '' && 'false' || inputs.submodules }}
         allow-unsafe-pr-checkout: ${{ inputs.allow-unsafe-pr-checkout }}
+
+    - name: Checkout submodules with a dedicated token
+      if: ${{ inputs.submodules != 'false' && inputs.submodules-token != '' }}
+      shell: bash
+      env:
+        SUBMODULES_TOKEN: ${{ inputs.submodules-token }}
+        RECURSIVE_FLAG: ${{ inputs.submodules == 'recursive' && '--recursive' || '' }}
+      run: |
+        set -euo pipefail
+        # actions/checkout itself rewrites SSH submodule URLs (git@github.com:...) to HTTPS when
+        # using token auth — replicate that here, since we're bypassing its built-in submodule
+        # handling specifically to use a separate, differently-scoped token.
+        #
+        # MUST be --global, not --local: `git submodule update --init` clones each submodule via a
+        # freshly spawned `git clone <url> <path>` subprocess, and that subprocess's target
+        # directory has no git repo (hence no --local config) until the clone itself creates one —
+        # so a --local rule on the superproject is invisible to it. Confirmed empirically: with
+        # --local the clone still attempted the raw SSH URL and failed; with --global it correctly
+        # saw the rewritten HTTPS URL. Safe here since every workflow in this repo runs on a fresh,
+        # ephemeral GitHub-hosted runner — nothing else in the job is affected by this rule.
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
+        AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SUBMODULES_TOKEN" | base64 -w0)"
+        # `-c` applies only to this one git invocation — never written to any persisted git config,
+        # unlike the url.insteadOf rewrite above.
+        git -c "http.https://github.com/.extraheader=${AUTH_HEADER}" submodule update --init $RECURSIVE_FLAG
 
     - name: Install pnpm
       uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9

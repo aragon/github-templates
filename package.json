@@ -3,6 +3,7 @@
     "private": true,
     "description": "Shared composite actions and reusable workflows. No runtime dependencies on purpose: action scripts must run on a bare runner.",
     "scripts": {
-        "test": "node --test 'lib/*.test.js' 'steps/**/*.test.js'"
+        "test": "node --test 'lib/*.test.js' 'steps/**/*.test.js'",
+        "contracts:update": "node lib/updateContracts.js"
     }
 }
