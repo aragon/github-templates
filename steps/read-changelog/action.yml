@@ -1,0 +1,30 @@
+name: Read Changelog Section
+description: Extracts the changelog section for a given version from CHANGELOG.md (outputs 'changes').
+
+inputs:
+  version:
+    description: Version to read (e.g. 1.2.3)
+    required: true
+  path:
+    description: Path to changelog file
+    required: false
+    default: ./CHANGELOG.md
+
+outputs:
+  changes:
+    description: Extracted changelog text for that version
+    value: ${{ steps.read.outputs.changes }}
+
+runs:
+  using: composite
+  steps:
+    - id: read
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        version: ${{ inputs.version }}
+        path: ${{ inputs.path }}
+      with:
+        script: |
+          // Require the script co-located with this action, not from the caller repo's checkout.
+          const readChangelog = require(`${process.env.GITHUB_ACTION_PATH}/readChangelog.js`);
+          await readChangelog({ github, context, core });

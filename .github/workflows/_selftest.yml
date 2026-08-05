@@ -1,0 +1,260 @@
+# Smoke test for the composite actions in this repo. Manual-dispatch only. Exercises the leaf
+# actions that need no secrets — proving they load and produce outputs — via relative ./steps/*
+# paths (valid here because this workflow runs in-repo, not via workflow_call).
+
+name: Self-test (steps)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  steps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup (install disabled — the root package has no dependencies or lockfile)
+        uses: ./steps/setup
+        with:
+          install: "false"
+
+      - name: Unit tests (lib + action scripts)
+        run: node --test 'lib/*.test.js' 'steps/**/*.test.js'
+
+      - name: extract-slack-ts
+        id: ets
+        uses: ./steps/extract-slack-ts
+        with:
+          body: "Some PR body\n<!-- slack_ts: 1700000000.123456 -->"
+
+      - name: assert extract-slack-ts
+        env:
+          TS: ${{ steps.ets.outputs.ts }}
+        run: |
+          set -euo pipefail
+          [ "$TS" = "1700000000.123456" ] || { echo "::error::extract-slack-ts failed: '$TS'"; exit 1; }
+
+      - name: build-release-notes
+        id: notes
+        uses: ./steps/build-release-notes
+        with:
+          changes: "- a change"
+          slack-ts: "1700000000.123456"
+
+      - name: assert build-release-notes
+        env:
+          NOTES_PATH: ${{ steps.notes.outputs.path }}
+        run: |
+          set -euo pipefail
+          grep -q "slack_ts: 1700000000.123456" "$NOTES_PATH" || { echo "::error::notes missing marker"; exit 1; }
+
+      - name: make a fake playwright report
+        run: |
+          mkdir -p e2e/test-results
+          echo '{"stats":{"expected":5,"flaky":1,"unexpected":0,"skipped":0}}' > e2e/test-results/results.json
+
+      - name: parse-playwright-results
+        id: pw
+        uses: ./steps/parse-playwright-results
+        with:
+          report-path: e2e/test-results/results.json
+          step-outcome: success
+
+      - name: assert parse-playwright-results
+        env:
+          RESULT: ${{ steps.pw.outputs.result }}
+          SUMMARY: ${{ steps.pw.outputs.summary }}
+        run: |
+          set -euo pipefail
+          [ "$RESULT" = "flaky" ] || { echo "::error::expected flaky, got '$RESULT'"; exit 1; }
+          echo "summary: $SUMMARY"
+
+      - name: generate-release-summary (git log of this repo)
+        uses: ./steps/generate-release-summary
+
+      - name: generate-release-summary (explicit path patterns)
+        uses: ./steps/generate-release-summary
+        with:
+          path-patterns: |
+            steps/**
+            lib/**
+
+      - name: make a fake package with a changelog
+        run: |
+          mkdir -p fixture
+          printf '{"name":"fixture-package","version":"1.1.0"}\n' > fixture/package.json
+          printf '## 1.1.0\n\n- feat: newest\n\n## 1.0.0\n\n- initial\n' > fixture/CHANGELOG.md
+
+      - name: read-changelog
+        id: changelog
+        uses: ./steps/read-changelog
+        with:
+          version: "1.1.0"
+          path: fixture/CHANGELOG.md
+
+      - name: assert read-changelog
+        env:
+          CHANGES: ${{ steps.changelog.outputs.changes }}
+        run: |
+          set -euo pipefail
+          [ "$CHANGES" = "- feat: newest" ] || { echo "::error::read-changelog failed: '$CHANGES'"; exit 1; }
+
+      # The fixture package.json is untracked, i.e. "dirty" — exactly how a `changeset version`
+      # bump looks to the action right before the release commit.
+      - name: generate-version-summary (single-package fixture)
+        id: version-summary
+        uses: ./steps/generate-version-summary
+        with:
+          package-dir: fixture
+
+      - name: assert generate-version-summary
+        env:
+          SUMMARY: ${{ steps.version-summary.outputs.summary }}
+        run: |
+          set -euo pipefail
+          echo "$SUMMARY" | grep -q '## fixture-package@1.1.0' || { echo "::error::version summary missing section: '$SUMMARY'"; exit 1; }
+          echo "$SUMMARY" | grep -q 'feat: newest' || { echo "::error::version summary missing changes: '$SUMMARY'"; exit 1; }
+
+      - name: changesets-guard — passes without pending changesets
+        uses: ./steps/changesets-guard
+
+      - name: make a pending changeset fixture
+        run: |
+          mkdir -p .changeset
+          printf -- '---\n"@aragon/fixture": patch\n---\n\nfix: pending\n' > .changeset/selftest-pending.md
+          printf 'app:\n  - "@aragon/fixture"\nother:\n  - "@aragon/other"\n' > fixture/release-scopes.yml
+
+      - name: changesets-guard — fails on a pending changeset
+        id: guard-all
+        continue-on-error: true
+        uses: ./steps/changesets-guard
+
+      - name: changesets-guard — in-scope changeset fails a scoped guard
+        id: guard-scoped
+        continue-on-error: true
+        uses: ./steps/changesets-guard
+        with:
+          scope: app
+          scopes-file: fixture/release-scopes.yml
+
+      - name: changesets-guard — out-of-scope changeset passes a scoped guard
+        uses: ./steps/changesets-guard
+        with:
+          scope: other
+          scopes-file: fixture/release-scopes.yml
+
+      - name: assert changesets-guard outcomes
+        env:
+          GUARD_ALL: ${{ steps.guard-all.outcome }}
+          GUARD_SCOPED: ${{ steps.guard-scoped.outcome }}
+        run: |
+          set -euo pipefail
+          rm -f .changeset/selftest-pending.md
+          [ "$GUARD_ALL" = "failure" ] || { echo "::error::expected failure, got '$GUARD_ALL'"; exit 1; }
+          [ "$GUARD_SCOPED" = "failure" ] || { echo "::error::expected failure, got '$GUARD_SCOPED'"; exit 1; }
+
+      # credential-retrieval is the only action that talks to 1Password, so it needs a real
+      # OP_SERVICE_ACCOUNT_TOKEN to exercise the happy path (out of scope for this secret-free
+      # self-test — see the module's own description). The cases below don't need one: they either
+      # fail during input validation (before any `op` call) or, for the "optional secret" case,
+      # never call `op` at all, so a placeholder token is enough.
+
+      - name: credential-retrieval — reject unknown mode
+        id: cr-bad-mode
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: not-a-real-mode
+          op-token: "placeholder"
+
+      - name: assert unknown mode is rejected
+        env:
+          OUTCOME: ${{ steps.cr-bad-mode.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject missing op-vault (alltoenv)
+        id: cr-missing-vault
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: alltoenv
+          op-token: "placeholder"
+          op-vault: ""
+
+      - name: assert missing op-vault is rejected
+        env:
+          OUTCOME: ${{ steps.cr-missing-vault.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject malformed secret-refs entry (missing '=')
+        id: cr-malformed
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            THIS_LINE_HAS_NO_EQUALS_SIGN
+
+      - name: assert malformed secret-refs entry is rejected
+        env:
+          OUTCOME: ${{ steps.cr-malformed.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject invalid secret name (byref)
+        id: cr-bad-name
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            1INVALID=op://vault/item/field
+
+      - name: assert invalid secret name is rejected
+        env:
+          OUTCOME: ${{ steps.cr-bad-name.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — reject invalid op:// reference (byref)
+        id: cr-bad-ref
+        continue-on-error: true
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            SOME_TOKEN=not-an-op-reference
+
+      - name: assert invalid op:// reference is rejected
+        env:
+          OUTCOME: ${{ steps.cr-bad-ref.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
+      - name: credential-retrieval — optional (empty) secret resolves without error
+        id: cr-optional
+        uses: ./steps/credential-retrieval
+        with:
+          mode: byref
+          op-token: "placeholder"
+          secret-refs: |
+            OPTIONAL_TOKEN=
+
+      - name: assert optional secret resolves to an empty string
+        env:
+          SECRETS_JSON: ${{ steps.cr-optional.outputs.secrets }}
+        run: |
+          set -euo pipefail
+          VALUE="$(jq -r '.OPTIONAL_TOKEN' <<< "$SECRETS_JSON")"
+          [ "$VALUE" = "" ] || { echo "::error::expected empty string, got '$VALUE'"; exit 1; }

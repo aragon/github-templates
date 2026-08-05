@@ -1,0 +1,33 @@
+# Example: deploy to Vercel (scenario A / B). The reusable workflow runs under the named GitHub
+# environment, so protection rules (required reviewers, branch allow-list) gate the deploy and the
+# VERCEL_TOKEN is only ever readable inside the module. Pin @main to a SHA in real use.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment"
+        required: true
+        default: staging
+        type: choice
+        options: [preview, development, staging, production]
+
+jobs:
+  deploy:
+    uses: aragon/github-templates/.github/workflows/deploy-vercel.yml@main
+    with:
+      env: ${{ inputs.env }}
+      vercel-scope: aragon-app
+      op-infra-vault: kv_app_infra # expects VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID items in this vault
+      op-env-vault: kv_app_${{ inputs.env }}
+      setup-command: pnpm run setup ${{ inputs.env }}
+      domain: ${{ inputs.env == 'production' && 'app.aragon.org' || '' }}
+      # Monorepo callers additionally set the workspace to deploy (and, per app, its own
+      # op-infra-vault — one Vercel project per vault):
+      #   workspace: apps/app
+      #   upload-sentry-source-maps: true
+      #   runtime-env-keys: SENTRY_DSN CRON_SECRET
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

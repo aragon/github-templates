@@ -1,0 +1,230 @@
+name: Compute Version
+description: |
+  Computes the next release version, bumps package.json, and updates CHANGELOG.md — for either
+  version engine. This is the single pluggable seam between Changesets and semantic-release; the
+  surrounding release orchestration is engine-agnostic and consumes the version/released/tag outputs.
+
+  Works in single-package repos (all defaults) and in pnpm monorepos: `package-dir` locates the
+  package whose version names the release, and `scope` (changesets only) restricts versioning to
+  one release scope from the consumer's scopes file — every other workspace package is passed to
+  `changeset version --ignore`. The scope is inverted into ignore flags (rather than listed
+  directly) so a newly added package fails safe: it stays ignored until it is added to a scope.
+
+  Repo-specific policies (stale-lineage guard, DB-migration detection, etc.) are intentionally NOT
+  here — keep them in the caller's thin wrapper so this action stays small.
+
+  Leaves the working tree modified (package.json, CHANGELOG.md, consumed .changeset files). It
+  does NOT commit, branch, tag or push.
+
+inputs:
+  engine:
+    description: "Version engine: 'changesets' or 'semantic-release'"
+    required: true
+  package-dir:
+    description: |
+      Directory of the package whose version names the release (e.g. 'apps/app' in a monorepo).
+      The version/tag outputs read <package-dir>/package.json. Default '.' = single-package repo.
+    required: false
+    default: "."
+  scope:
+    description: |
+      Changesets engine only: name of a release scope in the scopes file. All workspace packages
+      outside the scope are passed to changesets as --ignore. Empty = version everything.
+    required: false
+    default: ""
+  scopes-file:
+    description: "Consumer-repo path to the package→release-scope mapper (used with 'scope')"
+    required: false
+    default: ".github/release-scopes.yml"
+  ignore-packages:
+    description: |
+      Escape hatch instead of 'scope': newline-separated package names to pass to
+      `changeset version --ignore` directly, for consumers without a scopes file.
+      Mutually exclusive with 'scope'.
+    required: false
+    default: ""
+  tag-prefix:
+    description: "Release tag prefix; the tag output is '<tag-prefix><version>' (monorepo example: '@aragon/app@')"
+    required: false
+    default: "v"
+  base-branch:
+    description: "Base branch for the semantic-release dry-run (semantic-release engine only)"
+    required: false
+    default: "main"
+  prettier-changelog:
+    description: "Format the changed CHANGELOG.md files with prettier after bumping (changesets engine only)"
+    required: false
+    default: "true"
+  github-token:
+    description: "GitHub token (used by both engines for changelog/commit-analysis API calls)"
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: "The resulting version of the package at package-dir (e.g. 1.2.3); empty if that package was not bumped"
+    value: ${{ steps.compute.outputs.version }}
+  released:
+    description: |
+      'true' when the run produced version bumps, 'false' otherwise. In a scoped monorepo run this
+      can be 'true' while 'version'/'tag' are empty: another package in the scope was bumped but
+      the package at package-dir was not — commit the bumps, but there is nothing to tag here.
+    value: ${{ steps.compute.outputs.released }}
+  tag:
+    description: "'<tag-prefix><version>'; empty when the package at package-dir was not bumped"
+    value: ${{ steps.compute.outputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - id: compute
+      shell: bash
+      env:
+        ENGINE: ${{ inputs.engine }}
+        PACKAGE_DIR: ${{ inputs.package-dir }}
+        SCOPE: ${{ inputs.scope }}
+        SCOPES_FILE: ${{ inputs.scopes-file }}
+        IGNORE_PACKAGES: ${{ inputs.ignore-packages }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        PRETTIER_CHANGELOG: ${{ inputs.prettier-changelog }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -f "$PACKAGE_DIR/package.json" ]; then
+          echo "::error::No package.json found in package-dir '$PACKAGE_DIR'" >&2
+          exit 1
+        fi
+        if [ -n "$SCOPE" ] && [ -n "$IGNORE_PACKAGES" ]; then
+          echo "::error::'scope' and 'ignore-packages' are mutually exclusive" >&2
+          exit 1
+        fi
+
+        read_version() {
+          node -p "require(require('node:path').resolve(process.env.PACKAGE_DIR, 'package.json')).version"
+        }
+
+        # 'true' when versioning is restricted to a subset of a workspace: the version signal is
+        # then "any package.json got bumped", not "the package-dir version changed".
+        WORKSPACE_MODE=false
+        VERSION=""
+        RELEASED=false
+
+        case "$ENGINE" in
+          changesets)
+            # Changesets bumps package.json + CHANGELOG.md from accumulated .changeset/*.md files
+            # and deletes the consumed changesets. No-op (idempotent) when none are pending.
+            IGNORE_FLAGS=()
+            if [ -n "$SCOPE" ]; then
+              WORKSPACE_MODE=true
+              # Resolve the scope via the mapper shipped with this action, then invert it against
+              # the workspace package list into --ignore flags.
+              SCOPE_PACKAGES="$(node -e "console.log(require(require('node:path').join(process.env.GITHUB_ACTION_PATH, '..', '..', 'lib', 'releaseScopes.js')).resolveReleaseScope(process.argv[1], process.env.SCOPES_FILE).join(' '))" "$SCOPE")"
+              while IFS= read -r PACKAGE; do
+                case " $SCOPE_PACKAGES " in
+                  *" $PACKAGE "*) ;;
+                  *) IGNORE_FLAGS+=(--ignore "$PACKAGE") ;;
+                esac
+              done < <(pnpm m ls --json --depth -1 | node -p "JSON.parse(require('node:fs').readFileSync(0, 'utf8')).filter((pkg) => pkg.name && pkg.path !== process.cwd()).map((pkg) => pkg.name).join('\n')")
+            elif [ -n "$IGNORE_PACKAGES" ]; then
+              WORKSPACE_MODE=true
+              while IFS= read -r PACKAGE; do
+                if [ -n "$PACKAGE" ]; then
+                  IGNORE_FLAGS+=(--ignore "$PACKAGE")
+                fi
+              done <<< "$IGNORE_PACKAGES"
+            fi
+
+            BEFORE="$(read_version)"
+            pnpm changeset version "${IGNORE_FLAGS[@]}"
+            VERSION="$(read_version)"
+
+            if [ "$PRETTIER_CHANGELOG" = "true" ]; then
+              # Format every CHANGELOG the run touched (modified or newly created), wherever it
+              # lives in the workspace — not just the root one.
+              # node_modules is excluded explicitly as defense-in-depth for repos not gitignoring it.
+              CHANGED_CHANGELOGS="$({ git diff --name-only; git ls-files --others --exclude-standard; } | { grep 'CHANGELOG\.md$' || true; } | { grep -vE '(^|/)node_modules/' || true; } | sort -u)"
+              if [ -n "$CHANGED_CHANGELOGS" ]; then
+                PRETTIER_ARGS=()
+                while IFS= read -r FILE; do
+                  PRETTIER_ARGS+=("$FILE")
+                done <<< "$CHANGED_CHANGELOGS"
+                pnpm dlx prettier --write --prose-wrap never "${PRETTIER_ARGS[@]}"
+              fi
+            fi
+
+            if [ "$WORKSPACE_MODE" = "true" ]; then
+              # The root/package-dir version is not a reliable signal here: a scoped run may bump
+              # only sibling packages. Released = any manifest got bumped.
+              if [ -n "$(git diff --name-only -- '*package.json')" ]; then
+                RELEASED=true
+              fi
+              if [ "$VERSION" = "$BEFORE" ]; then
+                VERSION=""
+              fi
+            elif [ "$VERSION" != "$BEFORE" ]; then
+              RELEASED=true
+            else
+              VERSION=""
+            fi
+            ;;
+
+          semantic-release)
+            # Compute the next version from conventional commits via a dry-run, then bump manually.
+            # --branches override lets the dry-run baseline on the requested base branch.
+            # NOTE: re-validate this log parse on every semantic-release major upgrade — the
+            # "next release version is X.Y.Z" line format can change across versions.
+            if [ -n "$SCOPE" ] || [ -n "$IGNORE_PACKAGES" ]; then
+              echo "::error::'scope'/'ignore-packages' are changesets-only (semantic-release monorepos are unsupported)" >&2
+              exit 1
+            fi
+            if ! [[ "$BASE_BRANCH" =~ ^[A-Za-z0-9._/-]{1,255}$ ]]; then
+              echo "::error::Refusing unsafe base-branch: $BASE_BRANCH" >&2
+              exit 1
+            fi
+            cd "$PACKAGE_DIR"
+            pnpm exec semantic-release --dry-run --branches "$BASE_BRANCH" > "$RUNNER_TEMP/sr.log" 2>&1 || true
+            VERSION=$(grep -oiE 'next release version is [0-9]+\.[0-9]+\.[0-9]+' "$RUNNER_TEMP/sr.log" \
+              | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+            if [ -z "$VERSION" ]; then
+              echo "No releasable commits (or output format changed) — nothing to release." >&2
+              tail -n 50 "$RUNNER_TEMP/sr.log" >&2 || true
+            else
+              RELEASED=true
+              pnpm version "$VERSION" --no-git-tag-version --allow-same-version
+              # conventionalcommits preset; prepend the newest section (version from package.json).
+              pnpm dlx conventional-changelog-cli -p conventionalcommits -i CHANGELOG.md -s -r 1
+            fi
+            ;;
+
+          *)
+            echo "::error::Unknown engine '$ENGINE' (expected 'changesets' or 'semantic-release')" >&2
+            exit 1
+            ;;
+        esac
+
+        TAG=""
+        if [ -n "$VERSION" ]; then
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Computed version does not look like semver: $VERSION" >&2
+            exit 1
+          fi
+          TAG="${TAG_PREFIX}${VERSION}"
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9@._/-]+$ ]]; then
+            echo "::error::Computed tag contains characters invalid in a git ref: $TAG" >&2
+            exit 1
+          fi
+        fi
+
+        {
+          echo "version=$VERSION"
+          echo "released=$RELEASED"
+          echo "tag=$TAG"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ "$RELEASED" = "true" ]; then
+          echo "✅ Released: version='${VERSION:-<none at package-dir>}' tag='${TAG:-<none>}'"
+        else
+          echo "Nothing to release."
+        fi

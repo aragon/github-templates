@@ -1,0 +1,41 @@
+name: Slack Notify
+description: Posts a Slack message (optionally in a thread, or edits an existing one) via the co-located slackNotify.js script.
+
+inputs:
+  slack-bot-token:
+    description: Slack bot token
+    required: true
+  slack-channel-id:
+    description: Slack channel id
+    required: true
+  message:
+    description: Message to send (GitHub Markdown allowed)
+    required: true
+  thread-ts:
+    description: Slack thread ts to reply in
+    required: false
+    default: ""
+  update-ts:
+    description: Slack message ts to EDIT (chat.update) instead of posting a new message
+    required: false
+    default: ""
+
+outputs:
+  ts:
+    description: Slack message ts
+    value: ${{ steps.send.outputs.ts }}
+
+runs:
+  using: composite
+  steps:
+    - id: send
+      shell: bash
+      env:
+        SLACK_BOT_TOKEN: ${{ inputs.slack-bot-token }}
+        SLACK_CHANNEL_ID: ${{ inputs.slack-channel-id }}
+        SLACK_THREAD_TS: ${{ inputs.thread-ts }}
+        SLACK_UPDATE_TS: ${{ inputs.update-ts }}
+        MESSAGE: ${{ inputs.message }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/slackNotify.js" "$MESSAGE"

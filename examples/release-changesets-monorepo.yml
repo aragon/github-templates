@@ -1,0 +1,90 @@
+# Example: Changesets release of ONE workspace in a pnpm monorepo (scenario A, aragon/app-style).
+# Same three shared workflows as release-changesets.yml — the monorepo shape is expressed purely
+# through inputs. A second lineage (e.g. apps/assistant) is another copy of this file with its own
+# package-dir / tag-prefix / scope / release-branch-prefix.
+#
+# Conventions this relies on (consumer-owned data, parsed by the shared modules):
+#   .github/release-scopes.yml — scope → packages versioned together, e.g.
+#     app:
+#       - "@aragon/app"
+#       - "@aragon/assistant-chat"
+#   .github/filters.yml — workspace → path globs for release-summary attribution, e.g.
+#     app:
+#       - "apps/app/**"
+#       - "packages/assistant-chat/**"
+#
+# Pin @main to a SHA in real use (see examples/README.md).
+
+name: Release app (changesets, monorepo)
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+
+jobs:
+  start:
+    if: github.event_name == 'workflow_dispatch'
+    uses: aragon/github-templates/.github/workflows/release-start.yml@main
+    with:
+      engine: changesets
+      package-dir: apps/app
+      tag-prefix: "@aragon/app@"
+      scope: app
+      release-branch-prefix: release/app/
+      # Scoped runs may bump sibling packages without bumping apps/app — a version cannot always
+      # name the branch, so monorepo lineages use timestamps.
+      branch-suffix: timestamp
+      commit-message: "Release {tag}"
+      summary-path-filter: app
+      op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
+      op-gpg-key-path: op://kv_app_infra/arabot-1_SIGN_CERTS/private_key
+      op-gpg-passphrase-path: op://kv_app_infra/arabot-1_SIGN_CERTS/credential
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
+      op-linear-token-path: op://kv_app_infra/LINEAR_API_TOKEN/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  # On every push to a release/app/* PR: regenerate the scoped summary (incl. the ⚠️
+  # open-tickets warning), rewrite the PR body preserving the slack_ts marker, and — because
+  # the op-slack-* paths are set — edit the Slack head message in place to match.
+  refresh:
+    if: >
+      github.event_name == 'pull_request'
+      && github.event.action != 'closed'
+      && startsWith(github.event.pull_request.head.ref, 'release/app/')
+    uses: aragon/github-templates/.github/workflows/release-pr-refresh.yml@main
+    with:
+      release-branch-prefix: release/app/
+      tag-prefix: "@aragon/app@"
+      summary-path-filter: app
+      op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
+      op-linear-token-path: op://kv_app_infra/LINEAR_API_TOKEN/credential
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  # Tags the staging-TESTED head commit as @aragon/app@<version>. The scoped changesets-guard only
+  # trips on in-scope changesets — pending changesets of other lineages are expected to survive.
+  finalize:
+    if: >
+      github.event_name == 'pull_request'
+      && github.event.pull_request.merged == true
+      && startsWith(github.event.pull_request.head.ref, 'release/app/')
+    uses: aragon/github-templates/.github/workflows/release-finalize.yml@main
+    with:
+      sha: ${{ github.event.pull_request.head.sha }}
+      pr-body: ${{ github.event.pull_request.body }}
+      package-dir: apps/app
+      tag-prefix: "@aragon/app@"
+      changesets-guard: app
+      op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

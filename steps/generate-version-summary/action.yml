@@ -1,0 +1,45 @@
+name: Generate Version Summary
+description: |
+  Builds a release-PR summary from the CHANGELOG entries written by `changeset version`: one
+  "## <package>@<version>" section per bumped package. Run it after `changeset version` (or the
+  compute-version action) and before the release commit — a bumped package is one whose
+  package.json has an uncommitted change. Changesets engine only.
+
+inputs:
+  scope:
+    description: |
+      Name of a release scope in the scopes file; only its packages are considered.
+      Requires a pnpm workspace. Empty (with empty 'packages') = single-package mode.
+    required: false
+    default: ""
+  scopes-file:
+    description: "Consumer-repo path to the package→release-scope mapper (used with 'scope')"
+    required: false
+    default: ".github/release-scopes.yml"
+  packages:
+    description: "Escape hatch instead of 'scope': newline-separated package names to consider (pnpm workspace required)"
+    required: false
+    default: ""
+  package-dir:
+    description: "Single-package mode (when 'scope' and 'packages' are empty): directory of the one package to summarize"
+    required: false
+    default: "."
+
+outputs:
+  summary:
+    description: "Markdown summary; 'No packages bumped.' when nothing changed"
+    value: ${{ steps.summary.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - id: summary
+      shell: bash
+      env:
+        SCOPE: ${{ inputs.scope }}
+        SCOPES_FILE: ${{ inputs.scopes-file }}
+        PACKAGES: ${{ inputs.packages }}
+        PACKAGE_DIR: ${{ inputs.package-dir }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/generateVersionSummary.js"

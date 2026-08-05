@@ -1,0 +1,70 @@
+name: Generate Release Summary
+description: |
+  Generates a PR/Slack-friendly release summary from the git log range (optionally enriched with
+  Linear issue titles; tickets that are not completed/canceled surface in a leading '⚠️ Open
+  tickets' section with their current status — a warning, never a gate). The range starts at the
+  latest tag matching 'tag-glob'; in a monorepo, 'path-filter' (a named filter in the consumer's
+  filters file) restricts the summary to commits touching one workspace's paths.
+
+inputs:
+  linear-api-token:
+    description: Linear API token for fetching issue titles (optional)
+    required: false
+    default: ""
+  base-ref:
+    description: |
+      Override base ref for the summary range (optional, not recommended).
+      Auto-detection finds the latest tag matching 'tag-glob' and uses it directly as the range
+      base — commits merged during the previous release's staging window stay in. Only set this
+      for debugging or edge cases.
+    required: false
+    default: ""
+  tag-glob:
+    description: "Glob for release-boundary tags: 'v*' (default) or a monorepo package namespace like '@aragon/app@*'"
+    required: false
+    default: "v*"
+  path-filter:
+    description: "Name of a path filter in the filters file; only commits touching matching paths are summarized. Empty = all commits."
+    required: false
+    default: ""
+  filters-file:
+    description: "Consumer-repo path to the workspace→paths mapper (used with 'path-filter')"
+    required: false
+    default: ".github/filters.yml"
+  path-patterns:
+    description: "Escape hatch instead of 'path-filter': newline-separated path globs, for consumers without a filters file"
+    required: false
+    default: ""
+  release-commit-pattern:
+    description: |
+      Regex for release commits to drop from the summary. The default covers
+      'Release v1.2.3', 'Release @scope/pkg@1.2.3' and 'chore(release): 1.2.3'.
+    required: false
+    default: ""
+  repo:
+    description: "owner/repo used to linkify PR numbers (defaults to the current repository)"
+    required: false
+    default: ${{ github.repository }}
+
+outputs:
+  summary:
+    description: Generated summary markdown
+    value: ${{ steps.summary.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - id: summary
+      shell: bash
+      env:
+        LINEAR_API_TOKEN: ${{ inputs.linear-api-token }}
+        BASE_REF: ${{ inputs.base-ref }}
+        TAG_GLOB: ${{ inputs.tag-glob }}
+        PATH_FILTER: ${{ inputs.path-filter }}
+        FILTERS_FILE: ${{ inputs.filters-file }}
+        PATH_PATTERNS: ${{ inputs.path-patterns }}
+        RELEASE_COMMIT_PATTERN: ${{ inputs.release-commit-pattern }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/generateReleaseSummary.js"

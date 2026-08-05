@@ -1,0 +1,314 @@
+# Reusable E2E workflow — runs Playwright tests (smoke or build-verification) against a deployed URL.
+#
+# Works for single-package repos with the defaults, and for monorepos via 'working-directory'
+# (e.g. 'apps/app' — scripts, results and report paths all resolve inside it).
+#
+# Suites needing more than a headless browser (wallet/extension flows) use the optional generics
+# 'env-secret-refs', 'pre-test-command', 'use-xvfb' and 'extra-cache-path'. All default off: the
+# plain smoke path needs no secrets.
+#
+# SELF-REFERENCE NOTE: composite actions are referenced as `aragon/github-templates/steps/*@main`
+# because a relative `./steps/*` inside a reusable workflow would resolve against the CALLER repo,
+# not this one. `@main` is the bootstrap default — `release-self` + Dependabot pin these to the cut
+# tag/SHA once a release is published.
+
+name: E2E
+
+on:
+  workflow_call:
+    inputs:
+      deployment-url:
+        description: "Base URL to run E2E tests against"
+        required: true
+        type: string
+      environment:
+        description: "Environment name (used for artifact naming)"
+        required: true
+        type: string
+      mode:
+        description: "'smoke' (default) or 'bv' (build-verification / wallet flows)"
+        required: false
+        type: string
+        default: smoke
+      working-directory:
+        description: "Directory holding the e2e setup (monorepo: 'apps/app'); '.' = single-package repo"
+        required: false
+        type: string
+        default: "."
+      install-command:
+        description: "Command installing the Playwright browsers (run in working-directory)"
+        required: false
+        type: string
+        default: "pnpm e2e:install"
+      test-command:
+        description: "Command running the tests (run in working-directory); empty = 'pnpm e2e:<mode>'"
+        required: false
+        type: string
+        default: ""
+      pre-test-command:
+        description: |
+          Command run in working-directory after browser install and before the tests (e.g. build a
+          Synpress wallet cache). Sees the 'env-secret-refs' env vars and EXTRA_CACHE_HIT
+          ('true'/'false' — the extra-cache-path restore result) to skip expensive rebuilds.
+        required: false
+        type: string
+        default: ""
+      use-xvfb:
+        description: "Run pre-test-command and test-command under 'xvfb-run' (headed browsers / extension flows)"
+        required: false
+        type: boolean
+        default: false
+      env-secret-refs:
+        description: |
+          Newline-separated NAME=op://vault/item/field pairs exported (masked) into the job
+          environment for pre-test-command and test-command — wallet passwords, seeds, API keys.
+          Requires the OP_SERVICE_ACCOUNT_TOKEN secret when non-empty.
+        required: false
+        type: string
+        default: ""
+      extra-cache-path:
+        description: "Extra path to cache between runs (e.g. a Synpress wallet cache directory)"
+        required: false
+        type: string
+        default: ""
+      extra-cache-key-files:
+        description: |
+          Glob pattern(s) hashed into the extra cache key, NEWLINE-separated. hashFiles() joins its
+          arguments with a newline and @actions/glob splits on newlines, so a comma-separated string
+          is one pattern that matches nothing — which would silently freeze the cache key. Required
+          whenever 'extra-cache-path' is set.
+        required: false
+        type: string
+        default: ""
+      results-path:
+        description: "Playwright JSON results file; empty = <working-directory>/e2e/test-results/results.json"
+        required: false
+        type: string
+        default: ""
+      report-path:
+        description: "Playwright HTML report directory; empty = <working-directory>/e2e/playwright-report"
+        required: false
+        type: string
+        default: ""
+      timeout-minutes:
+        description: "Job timeout"
+        required: false
+        type: number
+        default: 15
+      artifact-viewer-host:
+        description: "Host serving uploaded HTML reports (for the job-summary link)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token — only needed when 'env-secret-refs' is set"
+        required: false
+    outputs:
+      result:
+        description: "Outcome: passed, flaky, failed, cancelled"
+        value: ${{ jobs.e2e.outputs.result }}
+      result_label:
+        description: "Human-readable outcome label"
+        value: ${{ jobs.e2e.outputs.result_label }}
+      summary:
+        description: "Counts string, e.g. '5 passed, 1 flaky'"
+        value: ${{ jobs.e2e.outputs.summary }}
+      report_artifact_id:
+        description: "Artifact ID of the uploaded Playwright HTML report"
+        value: ${{ jobs.e2e.outputs.report_artifact_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      result: ${{ steps.playwright-result.outputs.result }}
+      result_label: ${{ steps.playwright-result.outputs.result_label }}
+      summary: ${{ steps.playwright-result.outputs.summary }}
+      report_artifact_id: ${{ steps.upload-report.outputs.artifact-id }}
+    steps:
+      - name: Setup
+        uses: aragon/github-templates/steps/setup@main
+
+      - name: Resolve 1Password secrets
+        id: op
+        if: inputs.env-secret-refs != ''
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: ${{ inputs.env-secret-refs }}
+
+      # Job-wide: test-runner configs read process.env. Already masked by credential-retrieval.
+      # The delimiter dance is lib/gha.sh's gha_set_multiline inlined: a reusable workflow runs in
+      # the CALLER's checkout, so it cannot source this repo's lib/ the way the composite actions do.
+      - name: Export test env secrets
+        if: inputs.env-secret-refs != ''
+        env:
+          SECRETS_JSON: ${{ steps.op.outputs.secrets }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r key; do
+            value=$(jq -r --arg k "$key" '.[$k]' <<< "$SECRETS_JSON")
+            delim="ghadelim_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            {
+              echo "${key}<<$delim"
+              echo "$value"
+              echo "$delim"
+            } >> "$GITHUB_ENV"
+          done < <(jq -r 'keys[]' <<< "$SECRETS_JSON")
+
+      - name: Get Playwright version
+        id: pw-version
+        working-directory: ${{ inputs.working-directory }}
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.install-command }}
+
+      - name: Install Playwright OS deps
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm exec playwright install-deps chromium
+
+      # An unmatched pattern makes hashFiles() return an empty string, which turns the key below
+      # into a constant that never invalidates — fail instead of caching a stale asset forever.
+      - name: Validate extra cache key
+        if: inputs.extra-cache-path != ''
+        env:
+          KEY_FILES: ${{ inputs.extra-cache-key-files }}
+          KEY_HASH: ${{ hashFiles(inputs.extra-cache-key-files) }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY_FILES" ]; then
+            echo "::error::extra-cache-path requires extra-cache-key-files, or the cache key never invalidates" >&2
+            exit 1
+          fi
+          if [ -z "$KEY_HASH" ]; then
+            echo "::error::extra-cache-key-files matched no files. Patterns must be NEWLINE-separated: $KEY_FILES" >&2
+            exit 1
+          fi
+
+      - name: Cache extra test assets
+        id: extra-cache
+        if: inputs.extra-cache-path != ''
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ inputs.extra-cache-path }}
+          key: e2e-extra-${{ inputs.mode }}-${{ runner.os }}-${{ hashFiles(inputs.extra-cache-key-files) }}
+
+      - name: Prepare test environment
+        if: inputs.pre-test-command != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          EXTRA_CACHE_HIT: ${{ steps.extra-cache.outputs.cache-hit == 'true' }}
+          USE_XVFB: ${{ inputs.use-xvfb }}
+          PRE_TEST_COMMAND: ${{ inputs.pre-test-command }}
+        run: |
+          set -euo pipefail
+          # The command runs through `bash -c` so a `&&` chain stays intact: xvfb-run would
+          # otherwise wrap only the first command of the chain.
+          if [ "$USE_XVFB" = "true" ]; then
+            xvfb-run --auto-servernum bash -euo pipefail -c "$PRE_TEST_COMMAND"
+          else
+            bash -euo pipefail -c "$PRE_TEST_COMMAND"
+          fi
+
+      - name: Warmup deployment
+        env:
+          E2E_BASE_URL: ${{ inputs.deployment-url }}
+        run: |
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$E2E_BASE_URL" || true)
+            echo "Attempt $i: HTTP $STATUS"
+            [ "$STATUS" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "::warning::Warmup did not get 200 — proceeding anyway"
+
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          E2E_BASE_URL: ${{ inputs.deployment-url }}
+          MODE: ${{ inputs.mode }}
+          USE_XVFB: ${{ inputs.use-xvfb }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            smoke|bv) ;;
+            *) echo "::error::mode must be 'smoke' or 'bv', got '$MODE'"; exit 1 ;;
+          esac
+          CMD="$TEST_COMMAND"
+          if [ -z "$CMD" ]; then CMD="pnpm e2e:$MODE"; fi
+          # See "Prepare test environment" for why the command goes through `bash -c`.
+          if [ "$USE_XVFB" = "true" ]; then
+            xvfb-run --auto-servernum bash -euo pipefail -c "$CMD"
+          else
+            bash -euo pipefail -c "$CMD"
+          fi
+
+      - name: Parse Playwright results
+        id: playwright-result
+        if: always()
+        uses: aragon/github-templates/steps/parse-playwright-results@main
+        with:
+          report-path: ${{ inputs.results-path != '' && inputs.results-path || format('{0}/e2e/test-results/results.json', inputs.working-directory) }}
+          step-outcome: ${{ steps.tests.outcome }}
+
+      - name: Upload HTML report
+        id: upload-report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # bv gets its own artifact name so smoke and bv against the same environment can share
+          # one workflow run without an upload collision (artifacts are immutable).
+          name: ${{ inputs.mode == 'bv' && format('playwright-bv-report-{0}', inputs.environment) || format('playwright-report-{0}', inputs.environment) }}
+          path: ${{ inputs.report-path != '' && inputs.report-path || format('{0}/e2e/playwright-report/', inputs.working-directory) }}
+          retention-days: 14
+
+      - name: Add report link to job summary
+        if: always()
+        env:
+          MODE: ${{ inputs.mode }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          RESULT_LABEL: ${{ steps.playwright-result.outputs.result_label }}
+          RESULT_SUMMARY: ${{ steps.playwright-result.outputs.summary }}
+          ARTIFACT_ID: ${{ steps.upload-report.outputs.artifact-id }}
+          ARTIFACT_VIEWER_HOST: ${{ inputs.artifact-viewer-host }}
+        run: |
+          {
+            echo "### 🎭 Playwright ${MODE} report"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Environment** | \`${ENVIRONMENT}\` |"
+            echo "| **Result** | ${RESULT_LABEL} |"
+            echo "| **Summary** | ${RESULT_SUMMARY} |"
+            if [ -n "$ARTIFACT_VIEWER_HOST" ]; then
+              echo "| **HTML Report** | [View report](https://${ARTIFACT_VIEWER_HOST}/${GITHUB_REPOSITORY}/${ARTIFACT_ID}/index.html) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload traces on failure
+        if: ${{ always() && steps.playwright-result.outputs.result != 'passed' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.mode == 'bv' && format('playwright-bv-traces-{0}', inputs.environment) || format('playwright-traces-{0}', inputs.environment) }}
+          path: ${{ format('{0}/e2e/test-results/', inputs.working-directory) }}
+          retention-days: 7
