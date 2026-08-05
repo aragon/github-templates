@@ -50,6 +50,41 @@ on:
         required: false
         type: string
         default: ""
+      submodules:
+        description: "Pass-through to steps/setup's `submodules` (in turn actions/checkout's: false / true / recursive)."
+        required: false
+        type: string
+        default: "false"
+      op-submodules-token-path:
+        description: |
+          Optional 1Password path to a GitHub PAT used ONLY for fetching submodules — separate from
+          the main checkout, which keeps using the default job token. Needed when `submodules` pulls
+          in a PRIVATE submodule the default token (scoped to this repo only) can't read, e.g. a
+          fine-grained PAT that can read only the submodule's repo. Leave empty for public submodules
+          or no submodules at all.
+        required: false
+        type: string
+        default: ""
+      setup-install:
+        description: |
+          Whether steps/setup runs `pnpm install --frozen-lockfile`. Defaults to true (this
+          workflow always installs pnpm + Node either way, since `pnpm vercel build/deploy/alias`
+          below needs pnpm present). Set to "false" for a project that doesn't manage its own
+          dependencies via pnpm (no pnpm-lock.yaml) — e.g. a Deno-based project — so this step
+          doesn't fail looking for a lockfile that was never meant to exist.
+        required: false
+        type: string
+        default: "true"
+      setup-node-cache:
+        description: |
+          Pass-through to steps/setup's `node-cache` (in turn actions/setup-node's `cache`).
+          Defaults to "pnpm". actions/setup-node's own caching looks for a matching lockfile
+          (pnpm-lock.yaml) to hash for the cache key and FAILS the step if none exists — set this
+          to "" to disable caching entirely for a project with no pnpm-lock.yaml (see
+          setup-install above; the two normally go together).
+        required: false
+        type: string
+        default: "pnpm"
       setup-command:
         description: "Optional command run in <workspace> before the Vercel build (e.g. 'pnpm run setup production')"
         required: false
@@ -114,7 +149,8 @@ jobs:
     steps:
       # The only place 1Password is read in this workflow — see steps/credential-retrieval. All
       # credentials come from the same vault, one item per name (see op-infra-vault). The Sentry
-      # refs resolve to empty strings unless source-map upload is requested.
+      # refs resolve to empty strings unless source-map upload is requested. SUBMODULES_TOKEN is
+      # separate and optional — see op-submodules-token-path.
       - name: Resolve Vercel credentials
         id: op
         uses: aragon/github-templates/steps/credential-retrieval@main
@@ -128,11 +164,16 @@ jobs:
             SENTRY_AUTH_TOKEN=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_AUTH_TOKEN/credential', inputs.op-infra-vault) || '' }}
             SENTRY_ORG=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_ORG/credential', inputs.op-infra-vault) || '' }}
             SENTRY_PROJECT=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_PROJECT/credential', inputs.op-infra-vault) || '' }}
+            SUBMODULES_TOKEN=${{ inputs.op-submodules-token-path }}
 
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
         with:
           ref: ${{ inputs.ref }}
+          submodules: ${{ inputs.submodules }}
+          submodules-token: ${{ fromJSON(steps.op.outputs.secrets).SUBMODULES_TOKEN }}
+          install: ${{ inputs.setup-install }}
+          node-cache: ${{ inputs.setup-node-cache }}
 
       - name: Run setup command
         if: inputs.setup-command != ''
