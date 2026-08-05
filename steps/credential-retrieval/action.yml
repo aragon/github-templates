@@ -55,13 +55,18 @@ inputs:
 
         secret-refs: |
           RELEASE_TOKEN=op://kv_app_infra/ARABOT_PAT/credential
-          SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+          SLACK_BOT_TOKEN={{ inputs.op-slack-bot-token-path }}
+
+      (Write the second example with a leading dollar sign — the runner template-evaluates this
+      manifest when loading the action, prose included, so the literal expression syntax cannot
+      appear anywhere in this file's descriptions.)
 
       NAME must match [A-Za-z_][A-Za-z0-9_]*. A line whose ref side is empty (e.g. `SLACK_BOT_TOKEN=`)
       is treated as "optional secret not configured" and resolves to an empty string instead of
       failing — this lets callers wire through optional op-*-path inputs unconditionally. A line
       with no '=' at all is a malformed entry and fails the step (this is NOT the same as an empty
-      ref — it usually means a caller forgot to append `=${{ inputs.op-foo-path }}`).
+      ref — it usually means a caller forgot to append `={{ inputs.op-foo-path }}`, dollar sign
+      included).
     required: false
     default: ""
 
@@ -70,8 +75,9 @@ outputs:
     description: |
       'byref' only. JSON object mapping each NAME from `secret-refs` to its resolved value; always
       valid JSON — '{}' for any other mode (or when secret-refs is empty), so fromJSON() is always
-      safe to call unconditionally. Read a field with fromJSON(), e.g.:
-        ${{ fromJSON(steps.<id>.outputs.secrets).RELEASE_TOKEN }}
+      safe to call unconditionally. Read a field with fromJSON(), adding the leading dollar sign
+      (omitted here — see secret-refs above):
+        {{ fromJSON(steps.<id>.outputs.secrets).RELEASE_TOKEN }}
     value: ${{ steps.byref.outputs.secrets || '{}' }}
 
 runs:
