@@ -1,0 +1,927 @@
+{
+    "workflows": {
+        "deploy-docker.yml": {
+            "inputs": {
+                "allow-unsafe-pr-checkout": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "deploy-command": {
+                    "required": true,
+                    "type": "string"
+                },
+                "env": {
+                    "required": true,
+                    "type": "string"
+                },
+                "env-file-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ".env"
+                },
+                "op-env-vault": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-codeowners-group-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-ssh-host-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-ssh-key-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-ssh-user-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "ref": {
+                    "required": false,
+                    "type": "string"
+                },
+                "remote-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": "~/app"
+                },
+                "slack-thread-ts": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "version": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "gate-ts"
+            ]
+        },
+        "deploy-vercel.yml": {
+            "inputs": {
+                "domain": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "env": {
+                    "required": true,
+                    "type": "string"
+                },
+                "env-overrides": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-env-vault": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-infra-vault": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-submodules-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "patch-root-directory": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "prod": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "ref": {
+                    "required": false,
+                    "type": "string"
+                },
+                "runtime-env": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "runtime-env-keys": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "setup-command": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "setup-install": {
+                    "required": false,
+                    "type": "string",
+                    "default": "true"
+                },
+                "setup-node-cache": {
+                    "required": false,
+                    "type": "string",
+                    "default": "pnpm"
+                },
+                "submodules": {
+                    "required": false,
+                    "type": "string",
+                    "default": "false"
+                },
+                "upload-sentry-source-maps": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "vercel-scope": {
+                    "required": true,
+                    "type": "string"
+                },
+                "workspace": {
+                    "required": false,
+                    "type": "string",
+                    "default": "."
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "deploymentUrl"
+            ]
+        },
+        "e2e.yml": {
+            "inputs": {
+                "artifact-viewer-host": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "deployment-url": {
+                    "required": true,
+                    "type": "string"
+                },
+                "env-secret-refs": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "environment": {
+                    "required": true,
+                    "type": "string"
+                },
+                "extra-cache-key-files": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "extra-cache-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "install-command": {
+                    "required": false,
+                    "type": "string",
+                    "default": "pnpm e2e:install"
+                },
+                "mode": {
+                    "required": false,
+                    "type": "string",
+                    "default": "smoke"
+                },
+                "pre-test-command": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "report-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "results-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "test-command": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "timeout-minutes": {
+                    "required": false,
+                    "type": "number",
+                    "default": "15"
+                },
+                "use-xvfb": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "working-directory": {
+                    "required": false,
+                    "type": "string",
+                    "default": "."
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": false
+                }
+            },
+            "outputs": [
+                "report_artifact_id",
+                "result",
+                "result_label",
+                "summary"
+            ]
+        },
+        "release-finalize.yml": {
+            "inputs": {
+                "changelog-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "changesets-guard": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-release-token-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "package-dir": {
+                    "required": false,
+                    "type": "string",
+                    "default": "."
+                },
+                "pr-body": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "scopes-file": {
+                    "required": false,
+                    "type": "string",
+                    "default": ".github/release-scopes.yml"
+                },
+                "sha": {
+                    "required": true,
+                    "type": "string"
+                },
+                "tag-prefix": {
+                    "required": false,
+                    "type": "string",
+                    "default": "v"
+                },
+                "version": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "tag",
+                "version"
+            ]
+        },
+        "release-pr-refresh.yml": {
+            "inputs": {
+                "body-extras": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-linear-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-release-token-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-codeowners-group-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "release-branch-prefix": {
+                    "required": false,
+                    "type": "string",
+                    "default": "release/"
+                },
+                "summary-filters-file": {
+                    "required": false,
+                    "type": "string",
+                    "default": ".github/filters.yml"
+                },
+                "summary-path-filter": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "tag-prefix": {
+                    "required": false,
+                    "type": "string",
+                    "default": "v"
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": []
+        },
+        "release-start.yml": {
+            "inputs": {
+                "base-ref": {
+                    "required": false,
+                    "type": "string",
+                    "default": "${{ github.ref_name }}"
+                },
+                "body-extras": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "branch-suffix": {
+                    "required": false,
+                    "type": "string",
+                    "default": "version"
+                },
+                "commit-message": {
+                    "required": false,
+                    "type": "string",
+                    "default": "chore(release): {tag}"
+                },
+                "engine": {
+                    "required": true,
+                    "type": "string"
+                },
+                "git-user-email": {
+                    "required": false,
+                    "type": "string",
+                    "default": "41898282+github-actions[bot]@users.noreply.github.com"
+                },
+                "git-user-name": {
+                    "required": false,
+                    "type": "string",
+                    "default": "github-actions[bot]"
+                },
+                "ignore-packages": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "on-active-release": {
+                    "required": false,
+                    "type": "string",
+                    "default": "fail"
+                },
+                "op-gpg-key-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-gpg-passphrase-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-linear-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-release-token-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-codeowners-group-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "package-dir": {
+                    "required": false,
+                    "type": "string",
+                    "default": "."
+                },
+                "release-branch-prefix": {
+                    "required": false,
+                    "type": "string",
+                    "default": "release/"
+                },
+                "require-version-above-latest-tag": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "scope": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "scopes-file": {
+                    "required": false,
+                    "type": "string",
+                    "default": ".github/release-scopes.yml"
+                },
+                "summary-filters-file": {
+                    "required": false,
+                    "type": "string",
+                    "default": ".github/filters.yml"
+                },
+                "summary-mode": {
+                    "required": false,
+                    "type": "string",
+                    "default": "history"
+                },
+                "summary-path-filter": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "tag-prefix": {
+                    "required": false,
+                    "type": "string",
+                    "default": "v"
+                },
+                "target-branch": {
+                    "required": false,
+                    "type": "string",
+                    "default": "main"
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "branch",
+                "pr-number",
+                "pr-url",
+                "released",
+                "tag",
+                "version"
+            ]
+        }
+    },
+    "steps": {
+        "build-release-notes": {
+            "inputs": {
+                "changes": {
+                    "required": true
+                },
+                "path": {
+                    "required": false,
+                    "default": "release-notes.md"
+                },
+                "slack-ts": {
+                    "required": false,
+                    "default": ""
+                }
+            },
+            "outputs": [
+                "path"
+            ]
+        },
+        "changesets-guard": {
+            "inputs": {
+                "scope": {
+                    "required": false,
+                    "default": ""
+                },
+                "scopes-file": {
+                    "required": false,
+                    "default": ".github/release-scopes.yml"
+                }
+            },
+            "outputs": []
+        },
+        "compute-version": {
+            "inputs": {
+                "base-branch": {
+                    "required": false,
+                    "default": "main"
+                },
+                "engine": {
+                    "required": true
+                },
+                "github-token": {
+                    "required": false,
+                    "default": ""
+                },
+                "ignore-packages": {
+                    "required": false,
+                    "default": ""
+                },
+                "package-dir": {
+                    "required": false,
+                    "default": "."
+                },
+                "prettier-changelog": {
+                    "required": false,
+                    "default": "true"
+                },
+                "scope": {
+                    "required": false,
+                    "default": ""
+                },
+                "scopes-file": {
+                    "required": false,
+                    "default": ".github/release-scopes.yml"
+                },
+                "tag-prefix": {
+                    "required": false,
+                    "default": "v"
+                }
+            },
+            "outputs": [
+                "released",
+                "tag",
+                "version"
+            ]
+        },
+        "credential-retrieval": {
+            "inputs": {
+                "file-format": {
+                    "required": false,
+                    "default": "env"
+                },
+                "mode": {
+                    "required": false,
+                    "default": "alltoenv"
+                },
+                "op-token": {
+                    "required": true
+                },
+                "op-vault": {
+                    "required": false,
+                    "default": ""
+                },
+                "secret-filepath": {
+                    "required": false,
+                    "default": ".env"
+                },
+                "secret-refs": {
+                    "required": false,
+                    "default": ""
+                }
+            },
+            "outputs": [
+                "secrets"
+            ]
+        },
+        "extract-slack-ts": {
+            "inputs": {
+                "body": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "ts"
+            ]
+        },
+        "generate-release-summary": {
+            "inputs": {
+                "base-ref": {
+                    "required": false,
+                    "default": ""
+                },
+                "filters-file": {
+                    "required": false,
+                    "default": ".github/filters.yml"
+                },
+                "linear-api-token": {
+                    "required": false,
+                    "default": ""
+                },
+                "path-filter": {
+                    "required": false,
+                    "default": ""
+                },
+                "path-patterns": {
+                    "required": false,
+                    "default": ""
+                },
+                "release-commit-pattern": {
+                    "required": false,
+                    "default": ""
+                },
+                "repo": {
+                    "required": false,
+                    "default": "${{ github.repository }}"
+                },
+                "tag-glob": {
+                    "required": false,
+                    "default": "v*"
+                }
+            },
+            "outputs": [
+                "summary"
+            ]
+        },
+        "generate-version-summary": {
+            "inputs": {
+                "package-dir": {
+                    "required": false,
+                    "default": "."
+                },
+                "packages": {
+                    "required": false,
+                    "default": ""
+                },
+                "scope": {
+                    "required": false,
+                    "default": ""
+                },
+                "scopes-file": {
+                    "required": false,
+                    "default": ".github/release-scopes.yml"
+                }
+            },
+            "outputs": [
+                "summary"
+            ]
+        },
+        "gh-ensure-pr": {
+            "inputs": {
+                "base": {
+                    "required": true
+                },
+                "body": {
+                    "required": true
+                },
+                "head": {
+                    "required": true
+                },
+                "title": {
+                    "required": true
+                },
+                "token": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "number",
+                "url"
+            ]
+        },
+        "gh-ensure-release": {
+            "inputs": {
+                "notes-path": {
+                    "required": true
+                },
+                "tag": {
+                    "required": true
+                },
+                "title": {
+                    "required": false,
+                    "default": ""
+                },
+                "token": {
+                    "required": true
+                }
+            },
+            "outputs": []
+        },
+        "gh-ensure-tag": {
+            "inputs": {
+                "remote": {
+                    "required": false,
+                    "default": "origin"
+                },
+                "sha": {
+                    "required": true
+                },
+                "tag": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "created"
+            ]
+        },
+        "gh-pr-edit-body": {
+            "inputs": {
+                "body": {
+                    "required": true
+                },
+                "pr-number": {
+                    "required": true
+                },
+                "token": {
+                    "required": true
+                }
+            },
+            "outputs": []
+        },
+        "gh-pr-get-body": {
+            "inputs": {
+                "pr-number": {
+                    "required": true
+                },
+                "token": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "body"
+            ]
+        },
+        "git-ensure-branch": {
+            "inputs": {
+                "base-ref": {
+                    "required": true
+                },
+                "branch": {
+                    "required": true
+                },
+                "remote": {
+                    "required": false,
+                    "default": "origin"
+                }
+            },
+            "outputs": [
+                "created"
+            ]
+        },
+        "parse-playwright-results": {
+            "inputs": {
+                "report-path": {
+                    "required": true
+                },
+                "step-outcome": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "result",
+                "result_label",
+                "summary"
+            ]
+        },
+        "read-changelog": {
+            "inputs": {
+                "path": {
+                    "required": false,
+                    "default": "./CHANGELOG.md"
+                },
+                "version": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "changes"
+            ]
+        },
+        "setup": {
+            "inputs": {
+                "allow-unsafe-pr-checkout": {
+                    "required": false,
+                    "default": "false"
+                },
+                "fetch-depth": {
+                    "required": false,
+                    "default": "1"
+                },
+                "install": {
+                    "required": false,
+                    "default": "true"
+                },
+                "node-cache": {
+                    "required": false,
+                    "default": "pnpm"
+                },
+                "node-version": {
+                    "required": false,
+                    "default": "24"
+                },
+                "node-version-file": {
+                    "required": false,
+                    "default": ""
+                },
+                "ref": {
+                    "required": false
+                },
+                "registry-url": {
+                    "required": false,
+                    "default": ""
+                },
+                "repository": {
+                    "required": false,
+                    "default": "${{ github.repository }}"
+                },
+                "submodules": {
+                    "required": false,
+                    "default": "false"
+                },
+                "submodules-token": {
+                    "required": false,
+                    "default": ""
+                },
+                "token": {
+                    "required": false,
+                    "default": "${{ github.token }}"
+                }
+            },
+            "outputs": []
+        },
+        "slack-notify": {
+            "inputs": {
+                "message": {
+                    "required": true
+                },
+                "slack-bot-token": {
+                    "required": true
+                },
+                "slack-channel-id": {
+                    "required": true
+                },
+                "thread-ts": {
+                    "required": false,
+                    "default": ""
+                },
+                "update-ts": {
+                    "required": false,
+                    "default": ""
+                }
+            },
+            "outputs": [
+                "ts"
+            ]
+        }
+    }
+}

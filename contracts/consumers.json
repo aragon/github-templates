@@ -1,0 +1,39 @@
+{
+    "description": "Known consumer call shapes, checked by lib/backcompat.test.js: every input/secret listed here must stay defined on the called workflow, and every required input/secret of the called workflow must be listed here. Add an entry when a consumer repo starts calling a reusable workflow @main; keep the lists in sync with the consumer's `with:`/`secrets:` blocks.",
+    "consumers": [
+        {
+            "repo": "aragon/protocol-doc-ui",
+            "workflowFile": ".github/workflows/deploy-staging.yml",
+            "calls": "deploy-vercel.yml",
+            "inputs": [
+                "env",
+                "ref",
+                "domain",
+                "vercel-scope",
+                "op-infra-vault",
+                "op-submodules-token-path",
+                "submodules",
+                "setup-install",
+                "setup-node-cache",
+                "setup-command"
+            ],
+            "secrets": ["OP_SERVICE_ACCOUNT_TOKEN"]
+        },
+        {
+            "repo": "aragon/protocol-doc-ui",
+            "workflowFile": ".github/workflows/deploy-preview.yml",
+            "calls": "deploy-vercel.yml",
+            "inputs": [
+                "env",
+                "vercel-scope",
+                "op-infra-vault",
+                "op-submodules-token-path",
+                "submodules",
+                "setup-install",
+                "setup-node-cache",
+                "setup-command"
+            ],
+            "secrets": ["OP_SERVICE_ACCOUNT_TOKEN"]
+        }
+    ]
+}

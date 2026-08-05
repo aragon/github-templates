@@ -18,6 +18,10 @@ jobs:
         uses: ./steps/setup
         with:
           install: "false"
+          # No pnpm-lock.yaml exists here either, and setup-node FAILS when its pnpm cache finds no
+          # lockfile to hash — disabling it also exercises the lockfile-less consumer shape
+          # (Deno repos) that install/node-cache exist for.
+          node-cache: ""
 
       - name: Unit tests (lib + action scripts)
         run: node --test 'lib/*.test.js' 'steps/**/*.test.js'
