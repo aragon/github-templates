@@ -99,7 +99,7 @@ on:
         description: "Host serving uploaded HTML reports (for the job-summary link)"
         required: false
         type: string
-        default: ""
+        default: "gh-artifact-viewer.aragonservices.in"
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         description: "1Password service account token — only needed when 'env-secret-refs' is set"
