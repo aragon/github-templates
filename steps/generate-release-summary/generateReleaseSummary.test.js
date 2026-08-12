@@ -52,12 +52,12 @@ const git = (repository, args) =>
         .toString()
         .trim();
 
-const commitFile = (repository, file, content, subject) => {
+const commitFile = (repository, file, content, subject, body) => {
     const target = path.join(repository, file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, content);
     git(repository, ['add', file]);
-    git(repository, ['commit', '-m', subject]);
+    git(repository, ['commit', '-m', subject, ...(body ? ['-m', body] : [])]);
 };
 
 test('monorepo: keeps release-window commits and excludes everything the package tag ships', () => {
@@ -163,7 +163,7 @@ test('monorepo: keeps release-window commits and excludes everything the package
 
         assert.equal(packageTag, '@aragon/app@1.0.0');
         assert.deepEqual(
-            commits.map(({ subject }) => subject),
+            commits.map(({ title }) => title),
             [
                 'feat(APP-77): multi-commit feature (#43)',
                 'feat(APP-123): add app feature (#42)',
@@ -193,7 +193,7 @@ test('single-package: v* boundary, no path filter, drops both release-commit sty
 
         assert.equal(tag, 'v1.0.0');
         assert.deepEqual(
-            commits.map(({ subject }) => subject),
+            commits.map(({ title }) => title),
             ['feat: newest change', 'fix: after the release (#12)'],
         );
     } finally {
@@ -201,40 +201,30 @@ test('single-package: v* boundary, no path filter, drops both release-commit sty
     }
 });
 
-test('keeps the subject of a merge commit without a PR title in its body', () => {
-    const repository = createRepository();
-
-    try {
-        commitFile(repository, 'apps/app/a.txt', 'a', 'feat: base');
-        git(repository, ['checkout', '-b', 'feature/no-body']);
-        commitFile(repository, 'apps/app/b.txt', 'b', 'feat: branch work');
-        git(repository, ['checkout', 'main']);
-        git(repository, [
-            'merge',
-            '--no-ff',
-            'feature/no-body',
-            '-m',
-            'Merge pull request #7 from feature/no-body',
-        ]);
-
-        const repositoryGit = (args) => runGit(args, { cwd: repository });
-        const mergeCommit = repositoryGit(['rev-parse', 'HEAD']);
-
-        assert.equal(
-            resolveCommitTitle(
-                mergeCommit,
-                'Merge pull request #7 from feature/no-body',
-                repositoryGit,
-            ),
-            'Merge pull request #7 from feature/no-body',
-        );
-        assert.equal(
-            resolveCommitTitle('irrelevant', 'feat: squash subject (#8)'),
-            'feat: squash subject (#8)',
-        );
-    } finally {
-        fs.rmSync(repository, { recursive: true, force: true });
-    }
+test('resolves merge-style titles from the body and keeps the PR number visible', () => {
+    // No body to fall back to: the merge subject is all there is.
+    assert.equal(
+        resolveCommitTitle('Merge pull request #7 from feature/no-body', ''),
+        'Merge pull request #7 from feature/no-body',
+    );
+    // Non-merge subjects pass through untouched.
+    assert.equal(
+        resolveCommitTitle('feat: squash subject (#8)', 'ignored body'),
+        'feat: squash subject (#8)',
+    );
+    // The PR title from the body wins, with the PR number appended.
+    assert.equal(
+        resolveCommitTitle('Merge pull request #9 from aragon/feature', 'feat(APP-1): real title'),
+        'feat(APP-1): real title (#9)',
+    );
+    // A body line that already references a PR is not suffixed twice.
+    assert.equal(
+        resolveCommitTitle(
+            'Merge pull request #9 from aragon/feature',
+            '* feat: first commit (#9)\n* fix: second commit',
+        ),
+        'feat: first commit (#9)',
+    );
 });
 
 test('treats a workspace without package tags as a first release', () => {
@@ -264,7 +254,7 @@ test('treats a workspace without package tags as a first release', () => {
 
 // Runs generateSummary end-to-end inside a fixture repository with a mocked Linear API,
 // capturing the summary output. Restores cwd, env and global.fetch afterwards.
-const runGenerateSummary = async (repository, issuesById) => {
+const runGenerateSummary = async (repository, issuesById, { linearToken = 'lin_api_test' } = {}) => {
     const originalCwd = process.cwd();
     const originalFetch = global.fetch;
     const originalEnvironment = { ...process.env };
@@ -272,8 +262,12 @@ const runGenerateSummary = async (repository, issuesById) => {
 
     try {
         process.chdir(repository);
-        process.env.LINEAR_API_TOKEN = 'lin_api_test';
         process.env.REPO = 'aragon/app';
+        if (linearToken) {
+            process.env.LINEAR_API_TOKEN = linearToken;
+        } else {
+            delete process.env.LINEAR_API_TOKEN;
+        }
         delete process.env.BASE_REF;
         delete process.env.TAG_GLOB;
         delete process.env.PATH_FILTER;
@@ -359,6 +353,139 @@ test('omits the warning section when every ticket is finished', async () => {
         });
 
         assert.doesNotMatch(summary, /Open tickets/);
+    } finally {
+        fs.rmSync(repository, { recursive: true, force: true });
+    }
+});
+
+test('groups every commit of a ticket into a single linked entry', async () => {
+    const repository = createRepository();
+
+    try {
+        commitFile(repository, 'src/one.ts', 'one', 'feat(APP-500): part one (#10)');
+        commitFile(repository, 'src/two.ts', 'two', 'fix(APP-500): follow-up (#11)');
+
+        const summary = await runGenerateSummary(repository, {
+            'APP-500': {
+                title: 'Grouped feature',
+                url: 'https://linear.app/aragon/issue/APP-500',
+                state: { name: 'Done', type: 'completed' },
+            },
+        });
+
+        // One entry for the ticket, in the strongest section among its commits
+        // (feat > fix), carrying the PR links of every commit (newest first).
+        assert.match(
+            summary,
+            /## Features\n- \[APP-500: Grouped feature\]\(https:\/\/linear\.app\/aragon\/issue\/APP-500\) \(\[#11\]\(https:\/\/github\.com\/aragon\/app\/pull\/11\), \[#10\]\(https:\/\/github\.com\/aragon\/app\/pull\/10\)\)/,
+        );
+        assert.doesNotMatch(summary, /## Fixes/);
+        assert.equal(summary.match(/APP-500: Grouped feature/g).length, 1);
+    } finally {
+        fs.rmSync(repository, { recursive: true, force: true });
+    }
+});
+
+test('harvests tickets from the body of a merge-titled squash', async () => {
+    const repository = createRepository();
+
+    try {
+        // A squash that kept the merge-style subject: its real changes only live in the body.
+        commitFile(
+            repository,
+            'src/squash.ts',
+            'squash',
+            'Merge pull request #1502 from aragon/feature-x',
+            '* feat(APP-600): the real feature\n* fix(APP-601): a follow-up fix',
+        );
+
+        const summary = await runGenerateSummary(repository, {
+            'APP-600': {
+                title: 'Squashed feature',
+                url: 'https://linear.app/aragon/issue/APP-600',
+                state: { name: 'Done', type: 'completed' },
+            },
+            'APP-601': {
+                title: 'Squashed fix',
+                url: 'https://linear.app/aragon/issue/APP-601',
+                state: { name: 'Done', type: 'completed' },
+            },
+        });
+
+        // Both tickets surface as their own entries, linked to the squash PR; the
+        // commit classifies as a feature (feat outranks fix within one message).
+        assert.match(
+            summary,
+            /- \[APP-600: Squashed feature\]\(https:\/\/linear\.app\/aragon\/issue\/APP-600\) \(\[#1502\]\(https:\/\/github\.com\/aragon\/app\/pull\/1502\)\)/,
+        );
+        assert.match(
+            summary,
+            /- \[APP-601: Squashed fix\]\(https:\/\/linear\.app\/aragon\/issue\/APP-601\) \(\[#1502\]\(https:\/\/github\.com\/aragon\/app\/pull\/1502\)\)/,
+        );
+        assert.doesNotMatch(summary, /Merge pull request/);
+    } finally {
+        fs.rmSync(repository, { recursive: true, force: true });
+    }
+});
+
+test('caps body ticket harvesting so bulk-sync squashes stay one entry', async () => {
+    const repository = createRepository();
+
+    try {
+        const bulkBody = Array.from(
+            { length: 9 },
+            (_, index) => `* feat(APP-${index + 1}): bulk change ${index + 1}`,
+        ).join('\n');
+        commitFile(
+            repository,
+            'src/bulk.ts',
+            'bulk',
+            'Merge pull request #99 from aragon/bulk-sync',
+            bulkBody,
+        );
+
+        const summary = await runGenerateSummary(repository, {});
+
+        // Too many body tickets to be a genuine PR: no harvesting, the commit falls
+        // back to a single title entry built from the first body line.
+        assert.match(
+            summary,
+            /- feat\(APP-1\): bulk change 1 \(\[#99\]\(https:\/\/github\.com\/aragon\/app\/pull\/99\)\)/,
+        );
+        assert.doesNotMatch(summary, /APP-2/);
+    } finally {
+        fs.rmSync(repository, { recursive: true, force: true });
+    }
+});
+
+test('degrades to commit titles when no Linear token is provided', async () => {
+    const repository = createRepository();
+
+    try {
+        commitFile(repository, 'src/tokenless.ts', 'tokenless', 'feat(APP-700): tokenless work (#5)');
+
+        const summary = await runGenerateSummary(repository, {}, { linearToken: '' });
+
+        assert.match(
+            summary,
+            /## Features\n- feat\(APP-700\): tokenless work \(\[#5\]\(https:\/\/github\.com\/aragon\/app\/pull\/5\)\)/,
+        );
+        assert.doesNotMatch(summary, /linear\.app|Open tickets/);
+    } finally {
+        fs.rmSync(repository, { recursive: true, force: true });
+    }
+});
+
+test('deduplicates repeated titles without tickets', async () => {
+    const repository = createRepository();
+
+    try {
+        commitFile(repository, 'src/dep-a.ts', 'a', 'chore: bump deps');
+        commitFile(repository, 'src/dep-b.ts', 'b', 'chore: bump deps');
+
+        const summary = await runGenerateSummary(repository, {});
+
+        assert.equal(summary.match(/- chore: bump deps/g).length, 1);
     } finally {
         fs.rmSync(repository, { recursive: true, force: true });
     }
