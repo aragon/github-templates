@@ -18,12 +18,26 @@ gha_set_multiline() {
     } >> "$file"
 }
 
-# gha_mask VALUE — mask a secret in the job log. ::add-mask:: only masks the exact line it is
+# gha_mask VALUE [NAME] — mask a secret in the job log. ::add-mask:: only masks the exact line it is
 # given, so a multi-line credential needs one call per line or everything after the first line
 # shows up in cleartext.
+#
+# Lines shorter than GHA_MASK_MIN_LENGTH are left unmasked. The mask registry is job-wide and
+# matches substrings, so registering a short non-secret (a project name, an environment name)
+# replaces it everywhere it later appears — including inside unrelated values, where the runner then
+# drops the whole thing ("Skip output '<name>' since it may contain secret"). Nothing that short
+# carries enough entropy to be worth protecting at that price. NAME, when given, is named in the
+# warning so the value can be moved out of the secret store.
+: "${GHA_MASK_MIN_LENGTH:=12}"
 gha_mask() {
-    local line
+    local value="$1" name="${2:-}" label="a value" line
+    [ -n "$name" ] && label="'$name'"
     while IFS= read -r line || [ -n "$line" ]; do
-        [ -n "$line" ] && echo "::add-mask::$line"
-    done <<< "$1"
+        [ -z "$line" ] && continue
+        if [ "${#line}" -lt "$GHA_MASK_MIN_LENGTH" ]; then
+            echo "::warning::Not masking $label — shorter than $GHA_MASK_MIN_LENGTH characters. Non-secret config does not belong in a secret store: masking it corrupts every output that contains it."
+            continue
+        fi
+        echo "::add-mask::$line"
+    done <<< "$value"
 }
