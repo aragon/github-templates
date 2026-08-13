@@ -10,6 +10,11 @@
 #                item title). Broad, job-wide exposure by design — only for genuinely bulk secret
 #                needs (e.g. materialising a full app .env).
 #   - alltofile: same bulk load as alltoenv, appended to a file instead of $GITHUB_ENV.
+#
+# Every resolved value is masked, so a bulk vault must hold secrets only: masking is job-wide and
+# matches substrings, so a non-secret in the vault (a project name, a hostname) also gets replaced
+# inside unrelated values and silently breaks the outputs carrying them. `gha_mask` refuses values
+# too short to be secrets and warns instead — see lib/gha.sh.
 name: "Credential Retrieval"
 description: "Single entry point for every 1Password interaction: bulk vault -> env/file, or named op:// references -> a JSON output."
 
@@ -141,7 +146,7 @@ runs:
             continue
           fi
           item_credential=$(op read "op://${OP_VAULT}/${item_name}/credential")
-          gha_mask "$item_credential"
+          gha_mask "$item_credential" "$item_name"
           gha_set_multiline "$GITHUB_ENV" "$item_name" "$item_credential"
         done
         rm -f op_list.json
@@ -169,7 +174,7 @@ runs:
             continue
           fi
           item_credential=$(op read "op://${OP_VAULT}/${item_name}/credential")
-          gha_mask "$item_credential"
+          gha_mask "$item_credential" "$item_name"
           case "$FILE_FORMAT" in
             env)
               # The flat VARNAME=VARVALUE format has no standard escaping for embedded newlines —
@@ -226,7 +231,7 @@ runs:
             exit 1
           fi
           value="$(op read "$ref")"
-          gha_mask "$value"
+          gha_mask "$value" "$name"
           json=$(jq -c --arg k "$name" --arg v "$value" '. + {($k): $v}' <<< "$json")
         done <<< "$SECRET_REFS"
 
