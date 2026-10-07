@@ -59,8 +59,12 @@ Build (Docker) → Test (unit + integration via docker-compose + SCA/Trivy) → 
 (**semantic-release**, tag on merge) → Deploy (**Docker-over-SSH**, multi-env, three approval gates,
 rollback, back-merge main→dev, hotfix cherry-pick). The semantic-release + Docker reference.
 
-### D — Indexer (`aragon-indexer`) — future
-Build (Envio codegen) → Test. No release/deploy today. The design leaves a slot; not built in v1.
+### D — Indexer (`aragon-indexer`)
+Build (Envio codegen) → Test (unit + coverage gate, integration) → Release (**changesets**, the PR
+flow: `release-start`, `release-pr-refresh`, `release-finalize`, tag on merge) → Deploy (a push to the
+`deploy` branch builds on Envio Cloud; the repo's own `Release candidate` workflow moves `deploy` to the
+release PR head, follows the build, the sync and the domain contract suite in a commit status and
+reports to the release's Slack thread; promote stays manual). The Envio Cloud reference.
 
 ### Scenario × step × module matrix
 
@@ -69,7 +73,7 @@ Build (Envio codegen) → Test. No release/deploy today. The design leaves a slo
 | **A app** | `setup` | `e2e` (smoke+bv), `parse-playwright-results` | `compute-version[changesets]`, `release-start`, `release-finalize`, `read-changelog`, `build-release-notes`, `generate-release-summary`, `gh-ensure-*`, `git-ensure-branch` | `deploy-vercel` |
 | **B lib** | `setup` | `e2e` (optional) | `compute-version[changesets]`, `release-start`, `release-finalize`, `read-changelog` | npm OIDC publish (+ `deploy-vercel` for Storybook) |
 | **C backend** | `setup` + docker build | `e2e`, repo integration/SCA jobs | `compute-version[semantic-release]`, `release-start`, `release-finalize`, `generate-release-summary`, `gh-ensure-*` | `deploy-docker` |
-| **D indexer** | `setup` + codegen | repo job | *(future)* | *(future)* |
+| **D indexer** | `setup` + codegen | repo job (coverage gate, integration) | `compute-version[changesets]`, `release-start`, `release-pr-refresh`, `release-finalize`, `read-changelog` | repo job: push `deploy` → Envio Cloud build, `credential-retrieval`, `slack-notify`; promote by hand |
 
 Everything common is shared; what genuinely differs per scenario is **(a) the version engine** and
 **(b) the deploy target** — see §3.
@@ -256,7 +260,6 @@ Then repeat for gov-ui-kit / aragon-domain (clone of `app`'s changesets path) an
 
 ## 10. Out of scope (follow-up)
 - Consumer-repo migrations (the steps above) — SREDO tickets, DevOps-owned.
-- Greenfield release for indexers (scenario D).
 - Vercel-side hardening: dedicated project-scoped machine user; a spike on whether OIDC-for-deploy is
   viable for Vercel (likely unsupported today — Vercel OIDC targets the deployed app reaching backends,
   not the deploy itself).
