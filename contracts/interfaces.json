@@ -20,7 +20,22 @@
                     "type": "string",
                     "default": ".env"
                 },
+                "gated": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "next-steps": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "op-env-vault": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-release-token-path": {
                     "required": false,
                     "type": "string",
                     "default": ""
@@ -52,6 +67,11 @@
                     "required": true,
                     "type": "string"
                 },
+                "prepare-command": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "ref": {
                     "required": false,
                     "type": "string"
@@ -60,6 +80,16 @@
                     "required": false,
                     "type": "string",
                     "default": "~/app"
+                },
+                "slack-thread-pr-number": {
+                    "required": false,
+                    "type": "number",
+                    "default": "0"
+                },
+                "slack-thread-release-tag": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
                 },
                 "slack-thread-ts": {
                     "required": false,
@@ -78,7 +108,8 @@
                 }
             },
             "outputs": [
-                "gate-ts"
+                "gate-ts",
+                "slack-ts"
             ]
         },
         "deploy-vercel.yml": {
@@ -97,6 +128,21 @@
                     "type": "string",
                     "default": ""
                 },
+                "gated": {
+                    "required": false,
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "next-steps": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-build-secret-refs": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "op-env-vault": {
                     "required": false,
                     "type": "string",
@@ -105,6 +151,26 @@
                 "op-infra-vault": {
                     "required": true,
                     "type": "string"
+                },
+                "op-release-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-codeowners-group-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
                 },
                 "op-submodules-token-path": {
                     "required": false,
@@ -150,6 +216,21 @@
                     "type": "string",
                     "default": "pnpm"
                 },
+                "slack-thread-pr-number": {
+                    "required": false,
+                    "type": "number",
+                    "default": "0"
+                },
+                "slack-thread-release-tag": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "slack-thread-ts": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "submodules": {
                     "required": false,
                     "type": "string",
@@ -164,6 +245,11 @@
                     "required": true,
                     "type": "string"
                 },
+                "version": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "workspace": {
                     "required": false,
                     "type": "string",
@@ -176,7 +262,8 @@
                 }
             },
             "outputs": [
-                "deploymentUrl"
+                "deploymentUrl",
+                "slack-ts"
             ]
         },
         "e2e.yml": {
@@ -219,6 +306,21 @@
                     "type": "string",
                     "default": "smoke"
                 },
+                "op-release-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "pre-test-command": {
                     "required": false,
                     "type": "string",
@@ -230,6 +332,26 @@
                     "default": ""
                 },
                 "results-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "slack-thread-pr-number": {
+                    "required": false,
+                    "type": "number",
+                    "default": "0"
+                },
+                "slack-thread-release-tag": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "slack-thread-ts": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "suite-label": {
                     "required": false,
                     "type": "string",
                     "default": ""
@@ -267,8 +389,171 @@
                 "summary"
             ]
         },
+        "notify.yml": {
+            "inputs": {
+                "action": {
+                    "required": false,
+                    "type": "string",
+                    "default": "deploy"
+                },
+                "env": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "kind": {
+                    "required": true,
+                    "type": "string"
+                },
+                "message": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "next-steps": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-release-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-bot-token-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-slack-channel-id-path": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-slack-codeowners-group-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "ref": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "report-url": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "result": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "subject": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "suite": {
+                    "required": false,
+                    "type": "string",
+                    "default": "Tests"
+                },
+                "summary": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "thread-pr-number": {
+                    "required": false,
+                    "type": "number",
+                    "default": "0"
+                },
+                "thread-release-tag": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "thread-ts": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "url": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "version": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": [
+                "message-ts",
+                "ts"
+            ]
+        },
+        "release-complete.yml": {
+            "inputs": {
+                "env": {
+                    "required": true,
+                    "type": "string"
+                },
+                "op-linear-pipeline-key-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-release-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-codeowners-group-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "tag": {
+                    "required": true,
+                    "type": "string"
+                },
+                "url": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": []
+        },
         "release-finalize.yml": {
             "inputs": {
+                "after-release-note": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "changelog-path": {
                     "required": false,
                     "type": "string",
@@ -329,9 +614,50 @@
                 }
             },
             "outputs": [
+                "slack-ts",
                 "tag",
                 "version"
             ]
+        },
+        "release-pr-cancel.yml": {
+            "inputs": {
+                "cancel-waiting-runs-of": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-linear-pipeline-key-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-release-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-bot-token-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-channel-id-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
+                "op-slack-codeowners-group-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                }
+            },
+            "secrets": {
+                "OP_SERVICE_ACCOUNT_TOKEN": {
+                    "required": true
+                }
+            },
+            "outputs": []
         },
         "release-pr-refresh.yml": {
             "inputs": {
@@ -448,6 +774,11 @@
                     "type": "string",
                     "default": ""
                 },
+                "op-linear-pipeline-key-path": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "op-linear-token-path": {
                     "required": false,
                     "type": "string",
@@ -533,6 +864,7 @@
                 "pr-number",
                 "pr-url",
                 "released",
+                "slack-ts",
                 "tag",
                 "version"
             ]
@@ -739,6 +1071,24 @@
                 "url"
             ]
         },
+        "gh-ensure-pr-comment": {
+            "inputs": {
+                "message": {
+                    "required": true
+                },
+                "pr-number": {
+                    "required": false,
+                    "default": "${{ github.event.pull_request.number }}"
+                },
+                "tag": {
+                    "required": true
+                },
+                "token": {
+                    "required": true
+                }
+            },
+            "outputs": []
+        },
         "gh-ensure-release": {
             "inputs": {
                 "notes-path": {
@@ -818,6 +1168,26 @@
                 "created"
             ]
         },
+        "linear-release": {
+            "inputs": {
+                "access-key": {
+                    "required": false,
+                    "default": ""
+                },
+                "command": {
+                    "required": false,
+                    "default": "sync"
+                },
+                "stage": {
+                    "required": false,
+                    "default": ""
+                },
+                "version": {
+                    "required": true
+                }
+            },
+            "outputs": []
+        },
         "parse-playwright-results": {
             "inputs": {
                 "report-path": {
@@ -845,6 +1215,31 @@
             },
             "outputs": [
                 "changes"
+            ]
+        },
+        "resolve-slack-thread": {
+            "inputs": {
+                "pr-number": {
+                    "required": false,
+                    "default": ""
+                },
+                "release-tag": {
+                    "required": false,
+                    "default": ""
+                },
+                "token": {
+                    "required": false,
+                    "default": "${{ github.token }}"
+                },
+                "ts": {
+                    "required": false,
+                    "default": ""
+                }
+            },
+            "outputs": [
+                "actor",
+                "body",
+                "ts"
             ]
         },
         "setup": {

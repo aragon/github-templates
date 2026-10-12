@@ -1,9 +1,9 @@
-# Example: Changesets release (scenario A frontend / B library).
-# Three workflows shown together: Start (manual), Refresh (on release-PR push) and
-# Finalize (on release-PR merge).
-# Pin @main to a SHA in real use (see examples/README.md).
+# Example: Changesets release of a single-package repo (scenario A frontend / B library / D
+# indexer). Start (by hand), Refresh (on release-PR push), Finalize (on merge) and Cancel (on
+# close). What hangs off the GitHub Release — a deploy, an npm publish, a manual promote — is the
+# repo's own file (deploy-production.yml, publish-npm.yml).
 
-name: Release (changesets)
+name: Release
 
 on:
   workflow_dispatch: {}
@@ -11,8 +11,11 @@ on:
     types: [opened, synchronize, reopened, closed]
     branches: [main]
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  # Manual: cut the release branch + PR.
   start:
     if: github.event_name == 'workflow_dispatch'
     uses: aragon/github-templates/.github/workflows/release-start.yml@main
@@ -39,6 +42,8 @@ jobs:
     with:
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
       op-linear-token-path: op://kv_app_infra/LINEAR_API_TOKEN/credential
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
@@ -55,6 +60,20 @@ jobs:
       sha: ${{ github.event.pull_request.head.sha }}
       pr-body: ${{ github.event.pull_request.body }}
       changesets-guard: all
+      op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  cancel:
+    if: >
+      github.event_name == 'pull_request'
+      && github.event.action == 'closed'
+      && github.event.pull_request.merged == false
+      && startsWith(github.event.pull_request.head.ref, 'release/')
+    uses: aragon/github-templates/.github/workflows/release-pr-cancel.yml@main
+    with:
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
       op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
       op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential

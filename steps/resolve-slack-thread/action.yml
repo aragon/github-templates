@@ -1,0 +1,83 @@
+name: Resolve Slack Thread
+description: |
+  Finds the Slack thread a release conversation lives in. A release flow leaves the thread id as a
+  `<!-- slack_ts: … -->` marker in the release PR body, and release-finalize carries it into the
+  GitHub Release body; every later flow (deploys, publishes, cancel, complete) reads it back from
+  wherever it has a handle: an explicit ts, a PR number or a release tag. The first source that
+  yields a ts wins; with none the outputs are empty and callers post a new top-level message.
+
+  Also returns the body the marker was read from, with the markers stripped, for flows that
+  rewrite the Slack head message (cancel, complete) with the release notes it already shows.
+
+inputs:
+  ts:
+    description: "Explicit Slack ts (used as-is when set)"
+    required: false
+    default: ""
+  pr-number:
+    description: "Pull request whose body carries the marker"
+    required: false
+    default: ""
+  release-tag:
+    description: "GitHub Release (tag) whose body carries the marker"
+    required: false
+    default: ""
+  token:
+    description: "GitHub token able to read the PR / release (defaults to the job token)"
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  ts:
+    description: "Slack thread ts, or empty"
+    value: ${{ steps.resolve.outputs.ts }}
+  body:
+    description: "The PR or release body without the release markers (empty for an explicit ts)"
+    value: ${{ steps.resolve.outputs.body }}
+  actor:
+    description: "The release_actor marker, or empty"
+    value: ${{ steps.resolve.outputs.actor }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        TS_INPUT: ${{ inputs.ts }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        RELEASE_TAG: ${{ inputs.release-tag }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../lib/gha.sh"
+        BODY=""
+        if [ -z "$TS_INPUT" ] && [ -n "$PR_NUMBER" ]; then
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::pr-number must be a number, got '$PR_NUMBER'" >&2
+            exit 1
+          fi
+          if ! BODY="$(gh pr view "$PR_NUMBER" --json body -q .body 2>&1)"; then
+            echo "::warning::PR #$PR_NUMBER is not readable with this token ($BODY) — no release thread; grant pull-requests: read down the call chain or pass a PAT." >&2
+            BODY=""
+          fi
+        fi
+        has_ts() { BODY="$1" node -e 'process.exit(require(process.argv[1]).extractSlackTs(process.env.BODY || "") ? 0 : 1)' "$GITHUB_ACTION_PATH/../../lib/markers.js"; }
+        if [ -z "$TS_INPUT" ] && [ -n "$RELEASE_TAG" ] && ! has_ts "$BODY"; then
+          if ! [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9@._/-]+$ ]]; then
+            echo "::error::release-tag contains characters invalid in a git ref: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          BODY="$(gh release view "$RELEASE_TAG" --json body -q .body 2>/dev/null || true)"
+        fi
+        # Only the marker lines are parsed; the body is data, never executed.
+        RESULT="$(BODY="$BODY" TS_INPUT="$TS_INPUT" node -e '
+          const m = require(process.argv[1]);
+          const body = process.env.BODY || "";
+          const ts = process.env.TS_INPUT || m.extractSlackTs(body);
+          process.stdout.write(JSON.stringify({ ts, actor: m.extractReleaseActor(body), body: m.stripMarkers(body) }));
+        ' "$GITHUB_ACTION_PATH/../../lib/markers.js")"
+        echo "ts=$(jq -r .ts <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+        echo "actor=$(jq -r .actor <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+        gha_set_multiline "$GITHUB_OUTPUT" body "$(jq -r .body <<< "$RESULT")"

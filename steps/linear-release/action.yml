@@ -1,0 +1,59 @@
+name: Linear Release
+description: |
+  Mirrors a release into a Linear release pipeline (linear/linear-release-action): `sync` creates
+  the release and links the issues the commits reference, `update` moves it to a stage
+  (`in_progress`, `canceled`), `complete` marks it released. Linear is a mirror, never a gate: the
+  step is skipped without an access key and a Linear error only warns. `sync` scans the git
+  history, so the checkout must have full depth.
+
+inputs:
+  access-key:
+    description: "Linear pipeline access key; empty skips the step"
+    required: false
+    default: ""
+  command:
+    description: "sync | update | complete"
+    required: false
+    default: sync
+  version:
+    description: "Release version in Linear (the release tag, e.g. @aragon/app@1.2.3 or v1.2.3)"
+    required: true
+  stage:
+    description: "Stage for 'update' (in_progress, canceled)"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        COMMAND: ${{ inputs.command }}
+        STAGE: ${{ inputs.stage }}
+      run: |
+        set -euo pipefail
+        case "$COMMAND" in
+          sync|update|complete) ;;
+          *) echo "::error::command must be sync, update or complete, got '$COMMAND'" >&2; exit 1 ;;
+        esac
+        if [ "$COMMAND" = "update" ] && [ -z "$STAGE" ]; then
+          echo "::error::'update' needs a stage" >&2
+          exit 1
+        fi
+
+    - name: Skip without an access key
+      if: inputs.access-key == ''
+      shell: bash
+      run: echo "::notice::No Linear pipeline access key — the release is not mirrored into Linear."
+
+    - name: Linear release ${{ inputs.command }}
+      if: inputs.access-key != ''
+      continue-on-error: true
+      uses: linear/linear-release-action@30f9ae77461ec29f07fffe0c52edd1909bfbb6f5 # v0.18.1
+      with:
+        access_key: ${{ inputs.access-key }}
+        command: ${{ inputs.command }}
+        version: ${{ inputs.version }}
+        name: ${{ inputs.command == 'sync' && inputs.version || '' }}
+        stage: ${{ inputs.stage }}

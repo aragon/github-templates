@@ -2,9 +2,15 @@
 # supplies its own remote deploy command (e.g. scripts/app-deploy.sh) because that orchestration is
 # service-specific. SSH credentials are resolved from 1Password paths only inside this workflow.
 #
-# Optional Slack ceremony, off unless the op-slack-* paths are passed: notify-gate announces the
-# pending approval, notify-result reports the outcome, and `gate-ts` lets callers thread follow-ups.
-# Per-service config downloads and health checks stay in the caller or the deploy-command.
+# `prepare-command` runs in the checkout before the sync, with the 1Password CLI installed and
+# OP_SERVICE_ACCOUNT_TOKEN in its environment: the place for a repo to materialize its own config
+# files (several env files from one vault item, a docker config) so they travel to the server with
+# the code. `op-env-vault` covers the common one-vault-to-one-file case without a script.
+#
+# Slack ceremony (notify.yml), on when the op-slack-* paths are set: "started", "waiting for
+# approval" when `gated` (posted beside the deploy job, never ahead of it), and the result; the
+# messages thread under the release conversation found through `slack-thread-*`, or open a new
+# thread whose ts is returned as `slack-ts`.
 #
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
 
@@ -35,6 +41,11 @@ on:
         required: false
         type: string
         default: "~/app"
+      prepare-command:
+        description: "Command run in the checkout before the sync, with the `op` CLI and OP_SERVICE_ACCOUNT_TOKEN available (optional)"
+        required: false
+        type: string
+        default: ""
       deploy-command:
         description: "Command executed on the server, inside remote-path, after sync"
         required: true
@@ -66,13 +77,38 @@ on:
         required: false
         type: string
         default: ""
+      gated:
+        description: "The environment has required reviewers: post the 'waiting for approval' message with the team ping"
+        required: false
+        type: boolean
+        default: false
+      next-steps:
+        description: "Extra lines in the success message telling the reader what to do next (optional)"
+        required: false
+        type: string
+        default: ""
       slack-thread-ts:
-        description: "Existing Slack thread to post the gate/result messages into (e.g. a release thread); empty = new top-level messages"
+        description: "Existing Slack thread to post the ceremony into (e.g. a release thread); empty = new top-level messages"
+        required: false
+        type: string
+        default: ""
+      slack-thread-pr-number:
+        description: "PR whose body carries the slack_ts marker (0 = none)"
+        required: false
+        type: number
+        default: 0
+      slack-thread-release-tag:
+        description: "GitHub Release (tag) whose body carries the slack_ts marker (optional)"
+        required: false
+        type: string
+        default: ""
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT for reading the PR / release body (optional)"
         required: false
         type: string
         default: ""
       op-slack-bot-token-path:
-        description: "1Password path to the Slack bot token — enables the notify-gate / notify-result jobs (optional)"
+        description: "1Password path to the Slack bot token — enables the Slack ceremony (optional)"
         required: false
         type: string
         default: ""
@@ -92,8 +128,11 @@ on:
         required: true
     outputs:
       gate-ts:
-        description: "Slack ts of the notify-gate message (empty when Slack is off) — thread rollback/follow-up messages under it"
-        value: ${{ jobs.notify-gate.outputs.ts }}
+        description: "Slack ts of the gate message (empty when Slack is off or the deploy is not gated)"
+        value: ${{ jobs.notify-gate.outputs.message-ts }}
+      slack-ts:
+        description: "The Slack thread the ceremony posted into (empty when Slack is off)"
+        value: ${{ jobs.notify-start.outputs.ts }}
 
 permissions:
   contents: read
@@ -103,43 +142,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Sibling of `deploy`, never in its `needs`: a failed notification must not block the deploy.
-  notify-gate:
+  notify-start:
     if: inputs.op-slack-bot-token-path != ''
-    runs-on: ubuntu-latest
-    outputs:
-      ts: ${{ steps.slack.outputs.ts }}
-    steps:
-      - name: Resolve Slack secrets
-        id: op
-        uses: aragon/github-templates/steps/credential-retrieval@main
-        with:
-          mode: byref
-          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secret-refs: |
-            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
-            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
-            SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: start
+      env: ${{ inputs.env }}
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref || github.ref_name }}
+      thread-ts: ${{ inputs.slack-thread-ts }}
+      thread-pr-number: ${{ inputs.slack-thread-pr-number }}
+      thread-release-tag: ${{ inputs.slack-thread-release-tag }}
+      op-release-token-path: ${{ inputs.op-release-token-path }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
-      - name: Notify Slack — waiting for approval
-        id: slack
-        continue-on-error: true
-        uses: aragon/github-templates/steps/slack-notify@main
-        with:
-          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
-          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
-          thread-ts: ${{ inputs.slack-thread-ts }}
-          message: |
-            :double_vertical_bar: *Waiting for approval — deploy to ${{ inputs.env }}*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
-            ${{ inputs.version != '' && format('*Version:* `{0}`', inputs.version) || '' }}
-            *Ref:* `${{ inputs.ref || github.ref_name }}`
-            Approve the deploy: [here](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+  # Sibling of `deploy`, never in its `needs`: the gate message can never hold the deploy.
+  notify-gate:
+    needs: notify-start
+    if: ${{ inputs.op-slack-bot-token-path != '' && inputs.gated }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: gate
+      env: ${{ inputs.env }}
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref || github.ref_name }}
+      thread-ts: ${{ needs.notify-start.outputs.ts }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+      op-slack-codeowners-group-path: ${{ inputs.op-slack-codeowners-group-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
     steps:
-      # The only 1Password call in this workflow — see steps/credential-retrieval.
+      # The only 1Password reference resolution in this job — see steps/credential-retrieval. It
+      # also installs the `op` CLI, which prepare-command may use with the same token.
       - name: Resolve SSH credentials
         id: op
         uses: aragon/github-templates/steps/credential-retrieval@main
@@ -157,6 +199,14 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 1
           allow-unsafe-pr-checkout: ${{ inputs.allow-unsafe-pr-checkout }}
+
+      - name: Prepare the checkout
+        if: inputs.prepare-command != ''
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.env }}
+          PREPARE_COMMAND: ${{ inputs.prepare-command }}
+        run: bash -euo pipefail -c "$PREPARE_COMMAND"
 
       # Written before the rsync so the file travels to the server with the code.
       - name: Materialize env file from vault
@@ -206,29 +256,18 @@ jobs:
         run: rm -f ~/.ssh/deploy_key
 
   notify-result:
+    needs: [notify-start, deploy]
     if: ${{ always() && inputs.op-slack-bot-token-path != '' }}
-    needs: [notify-gate, deploy]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Resolve Slack secrets
-        id: op
-        uses: aragon/github-templates/steps/credential-retrieval@main
-        with:
-          mode: byref
-          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secret-refs: |
-            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
-            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
-
-      # Threads under the caller's thread if given, else under the gate message.
-      - name: Notify Slack — deploy result
-        continue-on-error: true
-        uses: aragon/github-templates/steps/slack-notify@main
-        with:
-          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
-          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
-          thread-ts: ${{ inputs.slack-thread-ts || needs.notify-gate.outputs.ts }}
-          message: |
-            ${{ needs.deploy.result == 'success' && format(':white_check_mark: *Deploy to {0} succeeded*', inputs.env) || format(':x: *Deploy to {0} — {1}*', inputs.env, needs.deploy.result) }}
-            ${{ inputs.version != '' && format('*Version:* `{0}`', inputs.version) || '' }}
-            *Ref:* `${{ inputs.ref || github.ref_name }}` · [logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: result
+      env: ${{ inputs.env }}
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref || github.ref_name }}
+      result: ${{ needs.deploy.result }}
+      next-steps: ${{ inputs.next-steps }}
+      thread-ts: ${{ needs.notify-start.outputs.ts }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

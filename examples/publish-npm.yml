@@ -1,0 +1,80 @@
+# Example: npm publish of a released package (scenario B, aragon/gov-ui-kit-style). The release
+# itself is release-changesets-monorepo.yml with the package's own package-dir / tag-prefix /
+# scope and a Tuesday cron; this file is what hangs off the GitHub Release instead of a deploy.
+#
+# The publish steps stay INLINE: npm trusted publishing (OIDC) binds the token to the workflow
+# that runs `publish`, and a reusable workflow would carry another identity. The ceremony around
+# it is shared: notify.yml posts the "waiting for approval" ping beside the gated job and the
+# result after it, release-complete.yml closes the release thread and the Linear release.
+
+name: Gov UI Kit Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write # npm trusted publishing
+  contents: read
+
+jobs:
+  # Sibling of `publish`, never in its `needs`: announces the gate without holding it.
+  notify-gate:
+    if: startsWith(github.event.release.tag_name, '@aragon/gov-ui-kit@')
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: gate
+      env: npm
+      action: publish
+      version: ${{ github.event.release.tag_name }}
+      thread-release-tag: ${{ github.event.release.tag_name }}
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  publish:
+    if: startsWith(github.event.release.tag_name, '@aragon/gov-ui-kit@')
+    runs-on: ubuntu-latest
+    # The required reviewers of this environment are the approval.
+    environment: npm-publish
+    steps:
+      - uses: aragon/github-templates/steps/setup@main
+        with:
+          # Build from the tag: the approval wait is unbounded, main may have moved meanwhile.
+          ref: ${{ github.event.release.tag_name }}
+          # Empty keeps setup-node from writing an .npmrc that shadows OIDC trusted publishing.
+          registry-url: ""
+      - run: pnpm --filter @aragon/gov-ui-kit build
+      - run: pnpm --filter @aragon/gov-ui-kit publish --access public --no-git-checks --provenance
+
+  notify-result:
+    needs: [notify-gate, publish]
+    if: ${{ always() && startsWith(github.event.release.tag_name, '@aragon/gov-ui-kit@') }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: result
+      env: npm
+      action: publish
+      version: ${{ github.event.release.tag_name }}
+      result: ${{ needs.publish.result }}
+      url: https://www.npmjs.com/package/@aragon/gov-ui-kit
+      thread-ts: ${{ needs.notify-gate.outputs.ts }}
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  complete:
+    needs: publish
+    uses: aragon/github-templates/.github/workflows/release-complete.yml@main
+    with:
+      tag: ${{ github.event.release.tag_name }}
+      env: npm
+      url: https://www.npmjs.com/package/@aragon/gov-ui-kit
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

@@ -1,0 +1,81 @@
+# Example: production deploy of a released tag (scenario A / B). Runs when release-finalize
+# publishes the GitHub Release, and by hand for a re-deploy or rollback target. The `production`
+# environment has required reviewers, so the deploy pauses there: `gated: true` posts the
+# "waiting for approval" message with the team ping into the release thread (found through the
+# release body), and the thread hears the result, the smoke tests and finally the head message
+# flips to "Completed" with the Linear release marked complete.
+#
+# In a monorepo every workspace raises `release: published`; the tag-prefix guard keeps one
+# workspace's release from deploying another.
+
+name: App Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to deploy (e.g. @aragon/app@1.17.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: ${{ github.event_name != 'release' || startsWith(github.event.release.tag_name, '@aragon/app@') }}
+    uses: aragon/github-templates/.github/workflows/deploy-vercel.yml@main
+    with:
+      env: production
+      ref: ${{ github.event.release.tag_name || inputs.tag }}
+      domain: app.aragon.org
+      vercel-scope: aragon-app
+      workspace: apps/app
+      op-infra-vault: kv_app_infra
+      op-env-vault: kv_app_production
+      setup-command: pnpm run setup production
+      version: ${{ github.event.release.tag_name || inputs.tag }}
+      gated: true
+      slack-thread-release-tag: ${{ github.event.release.tag_name || inputs.tag }}
+      next-steps: "If there are issues with the release, use hotfix or rollback."
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  smoke:
+    needs: deploy
+    uses: aragon/github-templates/.github/workflows/e2e.yml@main
+    with:
+      deployment-url: https://app.aragon.org
+      environment: production
+      working-directory: apps/app
+      artifact-viewer-host: gh-artifact-viewer.aragonservices.in
+      slack-thread-release-tag: ${{ github.event.release.tag_name || inputs.tag }}
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  # Only for a published release: a manual re-deploy of an older tag is not a release completing.
+  complete:
+    needs: deploy
+    if: github.event_name == 'release'
+    uses: aragon/github-templates/.github/workflows/release-complete.yml@main
+    with:
+      tag: ${{ github.event.release.tag_name }}
+      env: production
+      url: https://app.aragon.org
+      op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_app_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_app_infra/SLACK_CODEOWNERS_GROUP_ID/credential
+      op-linear-pipeline-key-path: op://kv_app_infra/LINEAR_PIPELINE_ACCESS_KEY/credential
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

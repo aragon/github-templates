@@ -39,6 +39,41 @@ jobs:
           set -euo pipefail
           [ "$TS" = "1700000000.123456" ] || { echo "::error::extract-slack-ts failed: '$TS'"; exit 1; }
 
+      - name: resolve-slack-thread (explicit ts wins, nothing is read)
+        id: thread
+        uses: ./steps/resolve-slack-thread
+        with:
+          ts: "1700000000.654321"
+          pr-number: "1"
+
+      - name: assert resolve-slack-thread
+        env:
+          TS: ${{ steps.thread.outputs.ts }}
+        run: |
+          set -euo pipefail
+          [ "$TS" = "1700000000.654321" ] || { echo "::error::resolve-slack-thread failed: '$TS'"; exit 1; }
+
+      - name: linear-release — skips without an access key
+        uses: ./steps/linear-release
+        with:
+          command: complete
+          version: v0.0.0
+
+      - name: linear-release — rejects an update without a stage
+        id: linear-bad
+        continue-on-error: true
+        uses: ./steps/linear-release
+        with:
+          command: update
+          version: v0.0.0
+
+      - name: assert linear-release validation
+        env:
+          OUTCOME: ${{ steps.linear-bad.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::expected failure, got '$OUTCOME'"; exit 1; }
+
       - name: build-release-notes
         id: notes
         uses: ./steps/build-release-notes

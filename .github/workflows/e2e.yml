@@ -7,6 +7,9 @@
 # 'env-secret-refs', 'pre-test-command', 'use-xvfb' and 'extra-cache-path'. All default off: the
 # plain smoke path needs no secrets.
 #
+# With the op-slack-* paths set, the result is posted into the release thread (notify.yml,
+# kind: tests): pass the thread explicitly, or the PR number / release tag whose body carries it.
+#
 # SELF-REFERENCE NOTE: composite actions are referenced as `aragon/github-templates/steps/*@main`
 # because a relative `./steps/*` inside a reusable workflow would resolve against the CALLER repo,
 # not this one. `@main` is the bootstrap default — `release-self` + Dependabot pin these to the cut
@@ -96,13 +99,48 @@ on:
         type: number
         default: 15
       artifact-viewer-host:
-        description: "Host serving uploaded HTML reports (for the job-summary link)"
+        description: "Host serving uploaded HTML reports (for the job-summary and Slack report links)"
+        required: false
+        type: string
+        default: ""
+      suite-label:
+        description: "Suite name in the Slack message; empty = 'Smoke tests' / 'BV tests' by mode"
+        required: false
+        type: string
+        default: ""
+      slack-thread-ts:
+        description: "Release thread to post the result into (optional)"
+        required: false
+        type: string
+        default: ""
+      slack-thread-pr-number:
+        description: "PR whose body carries the slack_ts marker (0 = none)"
+        required: false
+        type: number
+        default: 0
+      slack-thread-release-tag:
+        description: "GitHub Release (tag) whose body carries the slack_ts marker (optional)"
+        required: false
+        type: string
+        default: ""
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT for reading the PR / release body (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token — enables the result message (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
         required: false
         type: string
         default: ""
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
-        description: "1Password service account token — only needed when 'env-secret-refs' is set"
+        description: "1Password service account token — needed when 'env-secret-refs' or the op-slack-* paths are set"
         required: false
     outputs:
       result:
@@ -312,3 +350,25 @@ jobs:
           name: ${{ inputs.mode == 'bv' && format('playwright-bv-traces-{0}', inputs.environment) || format('playwright-traces-{0}', inputs.environment) }}
           path: ${{ format('{0}/e2e/test-results/', inputs.working-directory) }}
           retention-days: 7
+
+  # The tests never fail the job (continue-on-error above), so a red run means the suite could not
+  # run at all; the result still reaches the thread either way.
+  notify:
+    needs: e2e
+    if: ${{ always() && inputs.op-slack-bot-token-path != '' }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: tests
+      env: ${{ inputs.environment }}
+      suite: ${{ inputs.suite-label != '' && inputs.suite-label || (inputs.mode == 'bv' && 'BV tests' || 'Smoke tests') }}
+      result: ${{ needs.e2e.outputs.result || 'cancelled' }}
+      summary: ${{ needs.e2e.outputs.summary }}
+      report-url: ${{ inputs.artifact-viewer-host != '' && needs.e2e.outputs.report_artifact_id != '' && format('https://{0}/{1}/{2}/index.html', inputs.artifact-viewer-host, github.repository, needs.e2e.outputs.report_artifact_id) || '' }}
+      thread-ts: ${{ inputs.slack-thread-ts }}
+      thread-pr-number: ${{ inputs.slack-thread-pr-number }}
+      thread-release-tag: ${{ inputs.slack-thread-release-tag }}
+      op-release-token-path: ${{ inputs.op-release-token-path }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

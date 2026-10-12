@@ -1,0 +1,106 @@
+# Reusable Release — Complete. Called by the consumer once the released artifact is live: after the
+# production deploy of a tag, or after the npm publish of a package. Flips the Slack head message
+# to "Completed" (keeping the release notes it shows) and marks the Linear release complete. The
+# "deployed / published" thread message itself comes from notify.yml (kind: result) in the deploy
+# or publish flow — this workflow only closes the release.
+#
+# The thread is found through the GitHub Release body of `tag`, where release-finalize carried the
+# `<!-- slack_ts -->` marker.
+#
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+
+name: Release — Complete
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The release tag that went live (e.g. @aragon/app@1.2.3, v1.2.3)"
+        required: true
+        type: string
+      env:
+        description: "Where it went live, as shown in the head message (production, npm)"
+        required: true
+        type: string
+      url:
+        description: "Link shown next to the environment (the production URL, the npm package page)"
+        required: false
+        type: string
+        default: ""
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT used to read the release body (optional; the job token otherwise)"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-codeowners-group-path:
+        description: "1Password path to a Slack user-group id pinged (<!subteam^…>) in the head message (optional)"
+        required: false
+        type: string
+        default: ""
+      op-linear-pipeline-key-path:
+        description: "1Password path to the Linear release pipeline access key (optional)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token scoped to the caller repo's vault"
+        required: true
+
+# No permissions block: the caller's `contents: read` is all the release-body read needs.
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve 1Password secrets
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            RELEASE_TOKEN=${{ inputs.op-release-token-path }}
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+            SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
+            LINEAR_PIPELINE_ACCESS_KEY=${{ inputs.op-linear-pipeline-key-path }}
+
+      - name: Resolve the release thread
+        id: thread
+        uses: aragon/github-templates/steps/resolve-slack-thread@main
+        with:
+          release-tag: ${{ inputs.tag }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN || github.token }}
+
+      - name: Update the head message — Completed
+        if: ${{ inputs.op-slack-bot-token-path != '' && steps.thread.outputs.ts != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          update-ts: ${{ steps.thread.outputs.ts }}
+          message: |
+            🎉 *Release ${{ inputs.tag }} — Completed (${{ inputs.env }})* ✅${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
+            ${{ inputs.url != '' && format('*{0}:* {1}', inputs.env, inputs.url) || '' }}
+
+            ${{ steps.thread.outputs.body }}
+
+      - name: Linear — complete the release
+        if: inputs.op-linear-pipeline-key-path != ''
+        uses: aragon/github-templates/steps/linear-release@main
+        with:
+          access-key: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_PIPELINE_ACCESS_KEY }}
+          command: complete
+          version: ${{ inputs.tag }}
