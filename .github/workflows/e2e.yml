@@ -312,7 +312,7 @@ jobs:
       - name: Upload HTML report
         id: upload-report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # bv gets its own artifact name so smoke and bv against the same environment can share
           # one workflow run without an upload collision (artifacts are immutable).
@@ -345,7 +345,7 @@ jobs:
 
       - name: Upload traces on failure
         if: ${{ always() && steps.playwright-result.outputs.result != 'passed' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.mode == 'bv' && format('playwright-bv-traces-{0}', inputs.environment) || format('playwright-traces-{0}', inputs.environment) }}
           path: ${{ format('{0}/e2e/test-results/', inputs.working-directory) }}
