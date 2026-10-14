@@ -70,6 +70,14 @@ on:
         required: false
         type: string
         default: ""
+      after-release-note:
+        description: |
+          What happens next, appended to the "GitHub Release created" message so the reader knows
+          whether to wait or act (e.g. "Production build & deploy will start automatically.",
+          "The npm publish waits for an approval.").
+        required: false
+        type: string
+        default: ""
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         description: "1Password service account token scoped to the caller repo's vault"
@@ -79,6 +87,9 @@ on:
         value: ${{ jobs.finalize.outputs.tag }}
       version:
         value: ${{ jobs.finalize.outputs.version }}
+      slack-ts:
+        description: "The release thread (empty when the PR body carried no marker)"
+        value: ${{ jobs.finalize.outputs.slack-ts }}
 
 permissions:
   contents: write
@@ -95,6 +106,7 @@ jobs:
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
+      slack-ts: ${{ steps.slack-ts.outputs.ts }}
     steps:
       # Every op-*-path input is resolved here, in one place — see steps/credential-retrieval.
       - name: Resolve 1Password secrets
@@ -177,6 +189,16 @@ jobs:
           changes: ${{ steps.changelog.outputs.changes }}
           slack-ts: ${{ steps.slack-ts.outputs.ts }}
 
+      - name: Notify Slack — tagging
+        if: ${{ inputs.op-slack-bot-token-path != '' && steps.slack-ts.outputs.ts != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          thread-ts: ${{ steps.slack-ts.outputs.ts }}
+          message: "🏷️ *PR merged! Creating tag and GitHub Release...*"
+
       - name: Ensure tag
         uses: aragon/github-templates/steps/gh-ensure-tag@main
         with:
@@ -191,6 +213,8 @@ jobs:
           notes-path: ${{ steps.notes.outputs.path }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
+      # In the thread when the PR carried one; as a new message otherwise, so a release whose
+      # start had no Slack still announces itself.
       - name: Notify Slack — released
         if: inputs.op-slack-bot-token-path != ''
         continue-on-error: true
@@ -200,4 +224,21 @@ jobs:
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           thread-ts: ${{ steps.slack-ts.outputs.ts }}
           message: |
-            :label: *Tagged [${{ steps.resolve.outputs.tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.resolve.outputs.encoded-tag }})* and published the GitHub Release.
+            📦 *GitHub Release created:* [${{ steps.resolve.outputs.tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.resolve.outputs.encoded-tag }})
+            ${{ inputs.after-release-note != '' && format('_{0}_', inputs.after-release-note) || '' }}
+
+  notify-failure:
+    needs: finalize
+    if: ${{ failure() && inputs.op-slack-bot-token-path != '' }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: failure
+      subject: "Release finalize (tag + GitHub Release)"
+      version: ${{ needs.finalize.outputs.tag }}
+      thread-ts: ${{ needs.finalize.outputs.slack-ts }}
+      thread-pr-number: ${{ github.event.pull_request.number }}
+      op-release-token-path: ${{ inputs.op-release-token-path }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

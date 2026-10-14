@@ -8,6 +8,12 @@
 # a monorepo with several deployable apps calls this once per app, each with its own
 # workspace + op-infra-vault (one Vercel project per vault).
 #
+# Slack ceremony (notify.yml), on when the op-slack-* paths are set: "started" when the run
+# begins, "waiting for approval" when `gated` (the environment has required reviewers — posted
+# beside the deploy job, never ahead of it, so it can never hold the deploy), and the result.
+# The messages thread under the release conversation found through `slack-thread-*`, or open a
+# new thread whose ts is returned as `slack-ts`.
+#
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
 
 name: Deploy (Vercel)
@@ -47,6 +53,14 @@ on:
         type: string
       op-env-vault:
         description: "Optional 1Password vault to bulk-load environment secrets into <workspace>/.env before build"
+        required: false
+        type: string
+        default: ""
+      op-build-secret-refs:
+        description: |
+          Newline-separated NAME=op://vault/item/field pairs exported (masked) into the environment
+          of the setup command and the Vercel build only — e.g. a token that lets the build read a
+          private repository. Never lifted into the deployment's runtime env.
         required: false
         type: string
         default: ""
@@ -123,6 +137,56 @@ on:
         required: false
         type: boolean
         default: false
+      version:
+        description: "Version or tag label shown in the Slack messages (optional)"
+        required: false
+        type: string
+        default: ""
+      gated:
+        description: "The environment has required reviewers: post the 'waiting for approval' message with the team ping"
+        required: false
+        type: boolean
+        default: false
+      next-steps:
+        description: "Extra lines in the success message telling the reader what to do next (optional)"
+        required: false
+        type: string
+        default: ""
+      slack-thread-ts:
+        description: "Release thread to post the ceremony into (optional)"
+        required: false
+        type: string
+        default: ""
+      slack-thread-pr-number:
+        description: "PR whose body carries the slack_ts marker (0 = none)"
+        required: false
+        type: number
+        default: 0
+      slack-thread-release-tag:
+        description: "GitHub Release (tag) whose body carries the slack_ts marker (optional)"
+        required: false
+        type: string
+        default: ""
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT for reading the PR / release body (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token — enables the Slack ceremony (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-codeowners-group-path:
+        description: "1Password path to a Slack user-group id pinged (<!subteam^…>) in the gate message (optional)"
+        required: false
+        type: string
+        default: ""
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         description: "1Password service account token scoped to the caller repo's vault"
@@ -131,11 +195,48 @@ on:
       deploymentUrl:
         description: "The URL of the Vercel deployment"
         value: ${{ jobs.deploy.outputs.deploymentUrl }}
+      slack-ts:
+        description: "The Slack thread the ceremony posted into (empty when Slack is off)"
+        value: ${{ jobs.notify-start.outputs.ts }}
 
 permissions:
   contents: read
 
 jobs:
+  notify-start:
+    if: inputs.op-slack-bot-token-path != ''
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: start
+      env: ${{ inputs.env }}
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref || github.ref_name }}
+      thread-ts: ${{ inputs.slack-thread-ts }}
+      thread-pr-number: ${{ inputs.slack-thread-pr-number }}
+      thread-release-tag: ${{ inputs.slack-thread-release-tag }}
+      op-release-token-path: ${{ inputs.op-release-token-path }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+  # Sibling of `deploy`, never in its `needs`: the gate message can never hold the deploy.
+  notify-gate:
+    needs: notify-start
+    if: ${{ inputs.op-slack-bot-token-path != '' && inputs.gated }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: gate
+      env: ${{ inputs.env }}
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref || github.ref_name }}
+      thread-ts: ${{ needs.notify-start.outputs.ts }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+      op-slack-codeowners-group-path: ${{ inputs.op-slack-codeowners-group-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
@@ -147,7 +248,7 @@ jobs:
       ENABLE_EXPERIMENTAL_COREPACK: "1"
       PROD: ${{ (inputs.prod || inputs.env == 'production') && 'true' || 'false' }}
     steps:
-      # The only place 1Password is read in this workflow — see steps/credential-retrieval. All
+      # The only place 1Password is read in this job — see steps/credential-retrieval. All
       # credentials come from the same vault, one item per name (see op-infra-vault). The Sentry
       # refs resolve to empty strings unless source-map upload is requested. SUBMODULES_TOKEN is
       # separate and optional — see op-submodules-token-path.
@@ -165,6 +266,34 @@ jobs:
             SENTRY_ORG=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_ORG/credential', inputs.op-infra-vault) || '' }}
             SENTRY_PROJECT=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_PROJECT/credential', inputs.op-infra-vault) || '' }}
             SUBMODULES_TOKEN=${{ inputs.op-submodules-token-path }}
+
+      # Build-only secrets (e.g. a token for a private repository the build reads), named by the
+      # caller. Exported job-wide and masked; the runtime lift below only reads <workspace>/.env,
+      # so they never reach the deployment.
+      - name: Resolve build secrets
+        id: build-secrets
+        if: inputs.op-build-secret-refs != ''
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: ${{ inputs.op-build-secret-refs }}
+
+      - name: Export build secrets
+        if: inputs.op-build-secret-refs != ''
+        env:
+          SECRETS_JSON: ${{ steps.build-secrets.outputs.secrets }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r key; do
+            value=$(jq -r --arg k "$key" '.[$k]' <<< "$SECRETS_JSON")
+            delim="ghadelim_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            {
+              echo "${key}<<$delim"
+              echo "$value"
+              echo "$delim"
+            } >> "$GITHUB_ENV"
+          done < <(jq -r 'keys[]' <<< "$SECRETS_JSON")
 
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
@@ -308,7 +437,14 @@ jobs:
             PROD_ARG="--prod"
             SKIP_DOMAIN="--skip-domain"
           fi
-          URL="$(pnpm vercel deploy --prebuilt $PROD_ARG $SKIP_DOMAIN ${runtime_args[@]+"${runtime_args[@]}"} --yes --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE")"
+          # `vercel deploy` writes progress to stderr and the URL to stdout — take the last line so
+          # an extra line can never turn the output into a malformed multi-line entry, and stop
+          # here if there is no URL at all rather than aliasing an empty one below.
+          URL="$(pnpm vercel deploy --prebuilt $PROD_ARG $SKIP_DOMAIN ${runtime_args[@]+"${runtime_args[@]}"} --yes --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE" | tail -n 1)"
+          if [ -z "$URL" ]; then
+            echo "::error::vercel deploy printed no deployment URL" >&2
+            exit 1
+          fi
           echo "deploymentUrl=$URL" >> "$GITHUB_OUTPUT"
 
       - name: Alias deployment to domain
@@ -320,3 +456,38 @@ jobs:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.deploymentUrl }}
           DOMAIN: ${{ inputs.domain }}
         run: pnpm vercel alias "$DEPLOYMENT_URL" "$DOMAIN" --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+
+  # The runner drops a job output whose value contains a masked substring ("Skip output ... since
+  # it may contain secret"), so a successful deploy can still hand callers an empty URL — a broken
+  # PR comment and an E2E run against nothing, both under a green check. Fail the run instead.
+  verify-output:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the deployment URL reached the workflow output
+        env:
+          DEPLOYMENT_URL: ${{ needs.deploy.outputs.deploymentUrl }}
+        run: |
+          if [ -z "$DEPLOYMENT_URL" ]; then
+            echo "::error::The deployment succeeded but its URL did not survive into the workflow output. Check the deploy log for mask warnings: a value from the 1Password vault that also appears in the URL scrubs it away." >&2
+            exit 1
+          fi
+          echo "Deployment URL: $DEPLOYMENT_URL"
+
+  notify-result:
+    needs: [notify-start, deploy, verify-output]
+    if: ${{ always() && inputs.op-slack-bot-token-path != '' }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: result
+      env: ${{ inputs.env }}
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref || github.ref_name }}
+      result: ${{ needs.deploy.result == 'success' && needs.verify-output.result || needs.deploy.result }}
+      url: ${{ inputs.domain != '' && format('https://{0}', inputs.domain) || needs.deploy.outputs.deploymentUrl }}
+      next-steps: ${{ inputs.next-steps }}
+      thread-ts: ${{ needs.notify-start.outputs.ts }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

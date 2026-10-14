@@ -1,0 +1,260 @@
+# Reusable Notify — the one place the Slack ceremony texts live. Every flow (deploys, publishes,
+# tests, failures) posts through it so a release thread reads the same in every repo:
+#   start    ⏳ build & deploy started           gate     ⏸️ waiting for approval (+ team ping)
+#   result   ✅ deployed / ❌ failed              tests    ✅ smoke tests passed (+ report link)
+#   failure  ❌ <workflow> failed (+ run link)    message  caller-provided text
+#
+# Threading: the message goes into the release thread when one can be found — an explicit ts, or
+# the `<!-- slack_ts -->` marker in a PR body (`thread-pr-number`) or a GitHub Release body
+# (`thread-release-tag`), see steps/resolve-slack-thread. Without a thread it is a new top-level
+# message whose ts is returned, so the follow-ups of the same run can thread under it.
+#
+# Never a gate: the Slack call is continue-on-error, and callers must not put a deploy behind a
+# notify job. The deploy and release workflows of this repo call it as a nested reusable
+# workflow; consumers call it directly from jobs that cannot go through those (an inline npm
+# publish, a repo-specific deploy).
+#
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+
+name: Notify
+
+on:
+  workflow_call:
+    inputs:
+      kind:
+        description: "start | gate | result | tests | failure | message"
+        required: true
+        type: string
+      env:
+        description: "Target of the action, as shown in the text (staging, production, npm)"
+        required: false
+        type: string
+        default: ""
+      action:
+        description: "'deploy' (default) or 'publish' — picks the verb in the start/gate/result texts"
+        required: false
+        type: string
+        default: deploy
+      version:
+        description: "Version or tag label shown in the message (optional)"
+        required: false
+        type: string
+        default: ""
+      ref:
+        description: "Ref being deployed, shown in the start/gate/result texts (optional)"
+        required: false
+        type: string
+        default: ""
+      url:
+        description: "result: the URL the deploy landed on (optional)"
+        required: false
+        type: string
+        default: ""
+      result:
+        description: "result: success | failure | cancelled | skipped. tests: passed | flaky | failed | cancelled"
+        required: false
+        type: string
+        default: ""
+      next-steps:
+        description: "result (success only): extra lines telling the reader what to do next"
+        required: false
+        type: string
+        default: ""
+      suite:
+        description: "tests: suite label (e.g. 'Smoke tests', 'BV tests')"
+        required: false
+        type: string
+        default: "Tests"
+      summary:
+        description: "tests: counts line from parse-playwright-results"
+        required: false
+        type: string
+        default: ""
+      report-url:
+        description: "tests: link to the HTML report (optional)"
+        required: false
+        type: string
+        default: ""
+      subject:
+        description: "failure: what failed (defaults to the workflow name)"
+        required: false
+        type: string
+        default: ""
+      message:
+        description: "message: the text to post (GitHub Markdown)"
+        required: false
+        type: string
+        default: ""
+      thread-ts:
+        description: "Explicit Slack thread to post into"
+        required: false
+        type: string
+        default: ""
+      thread-pr-number:
+        description: "PR whose body carries the slack_ts marker (0 = none; a number, so callers pass github.event.pull_request.number as-is)"
+        required: false
+        type: number
+        default: 0
+      thread-release-tag:
+        description: "GitHub Release (tag) whose body carries the slack_ts marker"
+        required: false
+        type: string
+        default: ""
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT for reading the PR / release body (optional; the job token otherwise)"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token"
+        required: true
+        type: string
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id"
+        required: true
+        type: string
+      op-slack-codeowners-group-path:
+        description: "1Password path to a Slack user-group id pinged (<!subteam^…>) in gate messages (optional)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token scoped to the caller repo's vault"
+        required: true
+    outputs:
+      ts:
+        description: "The thread root ts: the resolved thread, or the posted message when it opened a new one (empty when nothing was posted)"
+        value: ${{ jobs.notify.outputs.ts }}
+      message-ts:
+        description: "ts of the posted message (empty when nothing was posted)"
+        value: ${{ jobs.notify.outputs.message-ts }}
+
+# No permissions block on purpose: a called workflow cannot ask for more than its caller grants.
+# Reading a release body needs nothing more than the job token; reading a PR body needs
+# `pull-requests: read` on every workflow down the call chain or the `op-release-token-path` PAT —
+# deploy-vercel, deploy-docker and e2e declare `contents: read` only, so under them only the PAT
+# works. Without either the lookup warns and the message is posted top-level.
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    outputs:
+      ts: ${{ steps.out.outputs.ts }}
+      message-ts: ${{ steps.slack.outputs.ts }}
+    steps:
+      - name: Resolve 1Password secrets
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            RELEASE_TOKEN=${{ inputs.op-release-token-path }}
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+            SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
+
+      - name: Resolve the release thread
+        id: thread
+        uses: aragon/github-templates/steps/resolve-slack-thread@main
+        with:
+          ts: ${{ inputs.thread-ts }}
+          pr-number: ${{ inputs.thread-pr-number != 0 && inputs.thread-pr-number || '' }}
+          release-tag: ${{ inputs.thread-release-tag }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN || github.token }}
+
+      # One text per kind, built here and nowhere else. Inputs reach the shell through env only.
+      - name: Compose the message
+        id: text
+        env:
+          KIND: ${{ inputs.kind }}
+          TARGET: ${{ inputs.env }}
+          ACTION: ${{ inputs.action }}
+          VERSION: ${{ inputs.version }}
+          REF: ${{ inputs.ref }}
+          URL: ${{ inputs.url }}
+          RESULT: ${{ inputs.result }}
+          NEXT_STEPS: ${{ inputs.next-steps }}
+          SUITE: ${{ inputs.suite }}
+          SUMMARY: ${{ inputs.summary }}
+          REPORT_URL: ${{ inputs.report-url }}
+          SUBJECT: ${{ inputs.subject || github.workflow }}
+          MESSAGE: ${{ inputs.message }}
+          TEAM: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ping=""
+          [ -n "$TEAM" ] && ping=" <!subteam^${TEAM}>"
+          version_line=""
+          [ -n "$VERSION" ] && version_line=$'\n'"*Version:* \`${VERSION}\`"
+          ref_line=""
+          [ -n "$REF" ] && ref_line=$'\n'"*Ref:* \`${REF}\`"
+          case "$ACTION" in
+            deploy)  doing="build & deploy"; done_="Deployed to" ;;
+            publish) doing="publish";        done_="Published to" ;;
+            *)       doing="$ACTION";        done_="${ACTION^} to" ;;
+          esac
+          case "$KIND" in
+            start)
+              text="⏳ *${TARGET^} ${doing} started...*${version_line}${ref_line}"
+              ;;
+            gate)
+              text="⏸️ *Waiting for approval — ${ACTION} to ${TARGET}*${ping}${version_line}${ref_line}"$'\n'"Approve: [here](${RUN_URL})"
+              ;;
+            result)
+              if [ "$RESULT" = "success" ]; then
+                text="✅ *${done_} ${TARGET}*${version_line}"
+                [ -n "$URL" ] && text="${text}"$'\n'"*URL:* ${URL}"
+                [ -n "$NEXT_STEPS" ] && text="${text}"$'\n\n'"${NEXT_STEPS}"
+              else
+                text="❌ *${ACTION^} to ${TARGET} ${RESULT:-failed}*${version_line}${ref_line}"$'\n'"[View run](${RUN_URL})"
+              fi
+              ;;
+            tests)
+              case "$RESULT" in
+                passed)    head="✅ ${SUITE} on *${TARGET}* passed" ;;
+                flaky)     head="⚠️ ${SUITE} on *${TARGET}* completed with flaky tests" ;;
+                failed)    head="❌ ${SUITE} on *${TARGET}* failed" ;;
+                cancelled) head="⏹️ ${SUITE} on *${TARGET}* were cancelled" ;;
+                *)         head="❓ ${SUITE} on *${TARGET}*: ${RESULT:-no result}" ;;
+              esac
+              text="$head"
+              [ -n "$SUMMARY" ] && text="${text}"$'\n'"${SUMMARY}"
+              [ -n "$REPORT_URL" ] && text="${text}"$'\n'"[View report](${REPORT_URL})"
+              ;;
+            failure)
+              text="❌ *${SUBJECT} failed*${version_line}"$'\n'"[View run](${RUN_URL})"
+              ;;
+            message)
+              if [ -z "$MESSAGE" ]; then
+                echo "::error::kind 'message' needs a message" >&2
+                exit 1
+              fi
+              text="$MESSAGE"
+              ;;
+            *)
+              echo "::error::Unknown kind '$KIND' (start, gate, result, tests, failure, message)" >&2
+              exit 1
+              ;;
+          esac
+          delimiter="ghadelim_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          { echo "text<<$delimiter"; printf '%s\n' "$text"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+
+      - name: Post to Slack
+        id: slack
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          thread-ts: ${{ steps.thread.outputs.ts }}
+          message: ${{ steps.text.outputs.text }}
+
+      - name: Thread root
+        id: out
+        env:
+          THREAD_TS: ${{ steps.thread.outputs.ts }}
+          MESSAGE_TS: ${{ steps.slack.outputs.ts }}
+        run: echo "ts=${THREAD_TS:-$MESSAGE_TS}" >> "$GITHUB_OUTPUT"

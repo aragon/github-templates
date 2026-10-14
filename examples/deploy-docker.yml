@@ -1,5 +1,8 @@
-# Example: deploy a backend service over SSH (scenario C). The repo supplies its own remote deploy
-# command; SSH credentials are resolved from 1Password inside the module. Pin @main to a SHA.
+# Example: deploy a backend service over SSH (scenario C), by hand to any environment. The repo
+# supplies its own remote deploy command and, through `prepare-command`, whatever config files
+# must travel to the server with the code; SSH credentials are resolved from 1Password inside the
+# module. The release flow calls the same workflow from its PR and release events (see
+# release-semantic-release.yml); this manual entry point is for out-of-cycle deploys.
 
 name: Deploy (backend)
 
@@ -13,23 +16,26 @@ on:
         type: choice
         options: [sandbox, development, staging, production]
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     uses: aragon/github-templates/.github/workflows/deploy-docker.yml@main
     with:
       env: ${{ inputs.env }}
-      remote-path: ~/app-backend
+      remote-path: ~/app-backend-deploy
+      prepare-command: bash scripts/download-configs.sh ${{ inputs.env }}
       deploy-command: bash scripts/app-deploy.sh ${{ inputs.env }}
-      op-ssh-key-path: op://apikeys_production/backend2_server_${{ inputs.env }}/deploy_cert
-      op-ssh-user-path: op://apikeys_production/backend2_server_${{ inputs.env }}/username
-      op-ssh-host-path: op://apikeys_production/backend2_server_${{ inputs.env }}/URL
-      # Optional extras — all off by default:
-      #   op-env-vault: kv_backend_${{ inputs.env }}          # materialize .env next to the code
-      #   version: ${{ inputs.env }}                          # label shown in Slack messages
-      #   slack-thread-ts: <a release thread ts>              # thread the ceremony under a release
-      #   op-slack-bot-token-path: op://.../SLACK_BOT_TOKEN/credential   # enables gate/result jobs
-      #   op-slack-channel-id-path: op://.../SLACK_CHANNEL_ID/credential
-      #   op-slack-codeowners-group-path: op://.../SLACK_CODEOWNERS_GROUP_ID/credential
-      # The workflow outputs `gate-ts` — thread rollback/follow-up messages under the gate message.
+      op-ssh-key-path: op://kv_backend2_infra/backend2_server_${{ inputs.env }}/deploy_cert
+      op-ssh-user-path: op://kv_backend2_infra/backend2_server_${{ inputs.env }}/username
+      op-ssh-host-path: op://kv_backend2_infra/backend2_server_${{ inputs.env }}/URL
+      # Slack ceremony, threaded under a new top-level "started" message for a manual deploy;
+      # staging and production have required reviewers, so their runs announce the gate.
+      gated: ${{ inputs.env == 'staging' || inputs.env == 'production' }}
+      op-slack-bot-token-path: op://kv_backend2_infra/SLACK_BOT_TOKEN/credential
+      op-slack-channel-id-path: op://kv_backend2_infra/SLACK_CHANNEL_ID/credential
+      op-slack-codeowners-group-path: op://kv_backend2_infra/SLACK_CODEOWNERS_GROUP_ID/credential
+      # Optional: op-env-vault materializes one vault into one env file without a script.
     secrets:
-      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_TEMP }}
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_BACKEND2_INFRA }}

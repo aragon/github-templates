@@ -76,7 +76,7 @@ on:
         type: string
         default: "chore(release): {tag}"
       on-active-release:
-        description: "'fail' the run when an active release PR exists, or 'skip' (green-exit with released=false)"
+        description: "'fail' the run when an active release PR exists, or 'skip' (green-exit with released=false; the skip is told to the Slack channel like a nothing-to-release one)"
         required: false
         type: string
         default: "fail"
@@ -158,6 +158,14 @@ on:
         required: false
         type: string
         default: ""
+      op-linear-pipeline-key-path:
+        description: |
+          1Password path to a Linear release pipeline access key (optional). With it the release is
+          mirrored into Linear: created and linked to its issues here, moved to 'in_progress',
+          canceled by release-pr-cancel and completed by release-complete.
+        required: false
+        type: string
+        default: ""
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         description: "1Password service account token scoped to the caller repo's vault"
@@ -175,6 +183,9 @@ on:
         value: ${{ jobs.start.outputs.pr-url }}
       pr-number:
         value: ${{ jobs.start.outputs.pr-number }}
+      slack-ts:
+        description: "The release thread (empty when Slack is off or nothing was released)"
+        value: ${{ jobs.start.outputs.slack-ts }}
 
 permissions:
   contents: write
@@ -196,6 +207,7 @@ jobs:
       branch: ${{ steps.branch.outputs.name }}
       pr-url: ${{ steps.pr.outputs.url }}
       pr-number: ${{ steps.pr.outputs.number }}
+      slack-ts: ${{ steps.slack.outputs.ts }}
     steps:
       # Every op-*-path input is resolved here, in one place — see steps/credential-retrieval.
       # Optional paths (gpg/slack/linear) are passed through as-is; an empty one just resolves to
@@ -214,6 +226,7 @@ jobs:
             SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
             SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
             LINEAR_API_TOKEN=${{ inputs.op-linear-token-path }}
+            LINEAR_PIPELINE_ACCESS_KEY=${{ inputs.op-linear-pipeline-key-path }}
 
       - name: Setup
         uses: aragon/github-templates/steps/setup@main
@@ -231,12 +244,15 @@ jobs:
           ON_ACTIVE_RELEASE: ${{ inputs.on-active-release }}
         run: |
           set -euo pipefail
-          OPEN=$(gh pr list --base "$TARGET_BRANCH" --state open --json headRefName \
-            -q "[.[] | select(.headRefName | startswith(\"$PREFIX\"))] | length")
-          if [ "${OPEN:-0}" -ne 0 ]; then
+          OPEN_URL=$(gh pr list --base "$TARGET_BRANCH" --state open --json headRefName,url \
+            -q "[.[] | select(.headRefName | startswith(\"$PREFIX\"))] | .[0].url // empty")
+          if [ -n "$OPEN_URL" ]; then
             if [ "$ON_ACTIVE_RELEASE" = "skip" ]; then
               echo "::notice::An active release PR already exists — skipping this run."
-              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "proceed=false"
+                echo "open-pr-url=$OPEN_URL"
+              } >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "::error::An active release PR already exists — only one active release at a time." >&2
@@ -300,9 +316,48 @@ jobs:
           fi
           echo "Computed version $VERSION is above the latest tag $LATEST_TAG."
 
-      - name: Nothing to release
-        if: ${{ steps.guard.outputs.proceed == 'true' && steps.version.outputs.released != 'true' }}
-        run: echo "::notice::No releasable changes — stopping without opening a release PR."
+      # A silent skip looks like a missed train. The channel is told why nothing was cut — on a
+      # scheduled run with the manual-start link, so whoever disagrees can start it by hand.
+      - name: Compose the skip note
+        id: skip
+        if: steps.version.outputs.released != 'true'
+        env:
+          PREFIX: ${{ inputs.release-branch-prefix }}
+          BASE_REF: ${{ inputs.base-ref }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          OPEN_PR_URL: ${{ steps.guard.outputs.open-pr-url }}
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOWS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows
+        run: |
+          set -euo pipefail
+          if [ -n "$OPEN_PR_URL" ]; then
+            reason="A release PR is still open: ${OPEN_PR_URL}"
+          else
+            LATEST_TAG=$(git tag --list "${TAG_PREFIX}[0-9]*" --sort=-v:refname | head -n 1)
+            reason="No releasable changes on \`${BASE_REF}\`${LATEST_TAG:+ since \`${LATEST_TAG}\`}"
+          fi
+          echo "::notice::${reason} — stopping without opening a release PR."
+          # github.workflow_ref is '<owner>/<repo>/.github/workflows/<file>@<ref>' of the caller.
+          workflow_file="${WORKFLOW_REF%@*}"
+          workflow_file="${workflow_file##*/}"
+          if [ "$EVENT" = "schedule" ]; then
+            text="⏭️ *Release (${PREFIX}) — skipped this week*"$'\n'"${reason}."$'\n'"Disagree? Start it by hand: [Run workflow](${WORKFLOWS_URL}/${workflow_file})"
+          else
+            text="⏭️ *Release (${PREFIX}) — not started* · by ${ACTOR}"$'\n'"${reason}."
+          fi
+          delimiter="ghadelim_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          { echo "text<<$delimiter"; printf '%s\n' "$text"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack — release skipped
+        if: ${{ steps.skip.outcome == 'success' && inputs.op-slack-bot-token-path != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          message: ${{ steps.skip.outputs.text }}
 
       - name: Create release branch
         id: branch
@@ -392,6 +447,27 @@ jobs:
           # branch is never stomped.
           git push --force-with-lease origin "$BRANCH"
 
+      # The head message goes out before the PR exists so its ts is in the PR body from creation:
+      # `opened` starts the consumer's deploy and e2e, which read the marker right away. Ceremony
+      # steps must not fail a release that is already cut — hence continue-on-error.
+      - name: Notify Slack — release started
+        id: slack
+        if: ${{ steps.version.outputs.released == 'true' && inputs.op-slack-bot-token-path != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          message: |
+            🚀 *Release ${{ steps.branch.outputs.label }} — Started*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
+            Branch: `${{ steps.branch.outputs.name }}` · by ${{ github.actor }}
+
+            ${{ steps.history-summary.outputs.summary || steps.packages-summary.outputs.summary }}
+
+            ${{ inputs.body-extras }}
+
+      # The PR body is this release's cross-run state: the thread downstream flows reply into,
+      # and the actor a refresh must not re-attribute to the last pusher.
       - name: Open release PR
         id: pr
         if: steps.version.outputs.released == 'true'
@@ -404,19 +480,21 @@ jobs:
             ${{ steps.history-summary.outputs.summary || steps.packages-summary.outputs.summary }}
 
             ${{ inputs.body-extras }}
+
+            ${{ steps.slack.outputs.ts && format('<!-- slack_ts: {0} -->', steps.slack.outputs.ts) || '' }}
+            <!-- release_actor: ${{ github.actor }} -->
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
-      # Ceremony steps must not fail a release that is already cut — hence continue-on-error.
-      - name: Notify Slack — release started
-        id: slack
-        if: ${{ steps.version.outputs.released == 'true' && inputs.op-slack-bot-token-path != '' }}
+      - name: Add the PR link to the head message
+        if: ${{ steps.slack.outputs.ts != '' }}
         continue-on-error: true
         uses: aragon/github-templates/steps/slack-notify@main
         with:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          update-ts: ${{ steps.slack.outputs.ts }}
           message: |
-            :rocket: *Release ${{ steps.branch.outputs.label }} started*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
+            🚀 *Release ${{ steps.branch.outputs.label }} — Started*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
             *PR:* ${{ steps.pr.outputs.url }}
             Branch: `${{ steps.branch.outputs.name }}` · by ${{ github.actor }}
 
@@ -424,26 +502,37 @@ jobs:
 
             ${{ inputs.body-extras }}
 
-      - name: Read PR body
-        id: pr-body
-        if: ${{ steps.slack.outputs.ts != '' }}
-        continue-on-error: true
-        uses: aragon/github-templates/steps/gh-pr-get-body@main
+      # Mirror into Linear: the release is created with its issues linked (sync scans the history
+      # since the previous tag) and moved to in_progress; only when the named package was bumped,
+      # since the Linear version is the tag. Linear never fails a release that is already cut.
+      - name: Linear — create the release
+        if: ${{ steps.version.outputs.released == 'true' && steps.version.outputs.tag != '' && inputs.op-linear-pipeline-key-path != '' }}
+        uses: aragon/github-templates/steps/linear-release@main
         with:
-          pr-number: ${{ steps.pr.outputs.number }}
-          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
+          access-key: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_PIPELINE_ACCESS_KEY }}
+          command: sync
+          version: ${{ steps.version.outputs.tag }}
 
-      # The PR body is this release's cross-run state: the thread downstream flows reply into,
-      # and the actor a refresh must not re-attribute to the last pusher.
-      - name: Persist release markers on PR
-        if: ${{ steps.pr-body.outcome == 'success' && steps.slack.outputs.ts != '' }}
-        continue-on-error: true
-        uses: aragon/github-templates/steps/gh-pr-edit-body@main
+      - name: Linear — move the release to in_progress
+        if: ${{ steps.version.outputs.released == 'true' && steps.version.outputs.tag != '' && inputs.op-linear-pipeline-key-path != '' }}
+        uses: aragon/github-templates/steps/linear-release@main
         with:
-          pr-number: ${{ steps.pr.outputs.number }}
-          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
-          body: |
-            ${{ steps.pr-body.outputs.body }}
+          access-key: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_PIPELINE_ACCESS_KEY }}
+          command: update
+          version: ${{ steps.version.outputs.tag }}
+          stage: in_progress
 
-            <!-- slack_ts: ${{ steps.slack.outputs.ts }} -->
-            <!-- release_actor: ${{ github.actor }} -->
+  # A failed start (a guard, the version engine, the push) is told to the channel: in the thread
+  # when the head message was already posted, as a new message otherwise.
+  notify-failure:
+    needs: start
+    if: ${{ failure() && inputs.op-slack-bot-token-path != '' }}
+    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    with:
+      kind: failure
+      subject: "Release start (${{ inputs.release-branch-prefix }})"
+      thread-ts: ${{ needs.start.outputs.slack-ts }}
+      op-slack-bot-token-path: ${{ inputs.op-slack-bot-token-path }}
+      op-slack-channel-id-path: ${{ inputs.op-slack-channel-id-path }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}

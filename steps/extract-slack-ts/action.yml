@@ -20,10 +20,5 @@ runs:
         BODY: ${{ inputs.body }}
       run: |
         set -euo pipefail
-        node - <<'NODE'
-        const fs = require("node:fs");
-        const body = process.env.BODY || "";
-        const m = body.match(/<!--\s*slack_ts:\s*([0-9.]+)\s*-->/);
-        const ts = (m && m[1]) ? m[1] : "";
-        fs.appendFileSync(process.env.GITHUB_OUTPUT, `ts=${ts}\n`);
-        NODE
+        TS="$(node -p 'require(process.argv[1]).extractSlackTs(process.env.BODY)' "$GITHUB_ACTION_PATH/../../lib/markers.js")"
+        echo "ts=$TS" >> "$GITHUB_OUTPUT"

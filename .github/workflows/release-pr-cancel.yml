@@ -1,0 +1,157 @@
+# Reusable Release — PR Cancel. Called by the consumer when a release PR is closed WITHOUT a merge:
+# the release thread hears it was abandoned, the Slack head message flips to "Cancelled" (keeping
+# the summary it already shows) and the Linear release moves to its canceled stage. Optionally
+# cancels the PR's workflow runs still waiting on an environment approval — that gate is moot once
+# the PR is gone and would otherwise sit as "Waiting" forever (needs `actions: write` on the
+# caller).
+#
+# The consumer's `if` selects the release-branch prefix; this workflow only checks the PR was not
+# merged. The version label is read from the PR title release-start wrote ("Release <tag>").
+#
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+
+name: Release — PR Cancel
+
+on:
+  workflow_call:
+    inputs:
+      cancel-waiting-runs-of:
+        description: |
+          Newline-separated workflow file names (e.g. release-pr.yml) whose runs for the PR's head
+          branch are cancelled while still queued, running or waiting on an approval. Empty = off.
+        required: false
+        type: string
+        default: ""
+      op-release-token-path:
+        description: "1Password path to a GitHub PAT used to read the PR body (optional; the job token otherwise)"
+        required: false
+        type: string
+        default: ""
+      op-slack-bot-token-path:
+        description: "1Password path to the Slack bot token (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-channel-id-path:
+        description: "1Password path to the Slack channel id (optional)"
+        required: false
+        type: string
+        default: ""
+      op-slack-codeowners-group-path:
+        description: "1Password path to a Slack user-group id pinged (<!subteam^…>) in the head message (optional)"
+        required: false
+        type: string
+        default: ""
+      op-linear-pipeline-key-path:
+        description: "1Password path to the Linear release pipeline access key (optional)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        description: "1Password service account token scoped to the caller repo's vault"
+        required: true
+
+# No permissions block: a called workflow cannot ask for more than its caller grants. The caller
+# needs `pull-requests: read` (or passes op-release-token-path) to read the PR body, and
+# `actions: write` when cancel-waiting-runs-of is set.
+
+jobs:
+  cancel:
+    if: github.event.pull_request.merged == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve 1Password secrets
+        id: op
+        uses: aragon/github-templates/steps/credential-retrieval@main
+        with:
+          mode: byref
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secret-refs: |
+            RELEASE_TOKEN=${{ inputs.op-release-token-path }}
+            SLACK_BOT_TOKEN=${{ inputs.op-slack-bot-token-path }}
+            SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
+            SLACK_CODEOWNERS_GROUP_ID=${{ inputs.op-slack-codeowners-group-path }}
+            LINEAR_PIPELINE_ACCESS_KEY=${{ inputs.op-linear-pipeline-key-path }}
+
+      - name: Resolve the release thread
+        id: thread
+        uses: aragon/github-templates/steps/resolve-slack-thread@main
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN || github.token }}
+
+      - name: Read the release label from the PR title
+        id: label
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          LABEL="$(printf '%s' "$TITLE" | sed -nE 's#^Release ([A-Za-z0-9@._/-]+)$#\1#p')"
+          echo "label=$LABEL" >> "$GITHUB_OUTPUT"
+
+      - name: Linear — move the release to canceled
+        if: ${{ steps.label.outputs.label != '' && inputs.op-linear-pipeline-key-path != '' }}
+        uses: aragon/github-templates/steps/linear-release@main
+        with:
+          access-key: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_PIPELINE_ACCESS_KEY }}
+          command: update
+          version: ${{ steps.label.outputs.label }}
+          stage: canceled
+
+      - name: Notify Slack — cancelled (in thread)
+        if: ${{ inputs.op-slack-bot-token-path != '' && steps.thread.outputs.ts != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          thread-ts: ${{ steps.thread.outputs.ts }}
+          message: "🛑 *Release cancelled* — PR closed without merging."
+
+      # chat.update on the head message release-start posted, so the channel shows the final state
+      # without opening the thread; the summary stays, only the status line changes.
+      - name: Update the head message — Cancelled
+        if: ${{ inputs.op-slack-bot-token-path != '' && steps.thread.outputs.ts != '' }}
+        continue-on-error: true
+        uses: aragon/github-templates/steps/slack-notify@main
+        with:
+          slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
+          slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
+          update-ts: ${{ steps.thread.outputs.ts }}
+          message: |
+            🛑 *${{ github.event.pull_request.title }} — Cancelled*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
+            *PR:* [${{ github.event.pull_request.title }}](${{ github.event.pull_request.html_url }})
+
+            ${{ steps.thread.outputs.body }}
+
+  # A run of the PR still paused on an environment gate has nothing left to deploy. Scoped to the
+  # named workflows so this never cancels finalize or a production deploy; the current run is
+  # skipped, a consumer may list the very workflow this job runs in.
+  cancel-runs:
+    if: inputs.cancel-waiting-runs-of != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel runs still waiting for the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          WORKFLOWS: ${{ inputs.cancel-waiting-runs-of }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r workflow; do
+            workflow="${workflow// /}"
+            [ -z "$workflow" ] && continue
+            if ! [[ "$workflow" =~ ^[A-Za-z0-9._-]+\.ya?ml$ ]]; then
+              echo "::error::Not a workflow file name: $workflow" >&2
+              exit 1
+            fi
+            IDS=$(gh run list --workflow="$workflow" --branch "$HEAD" --limit 50 --json databaseId,status \
+              -q '.[] | select(.databaseId != (env.RUN_ID | tonumber)) | select(.status=="waiting" or .status=="queued" or .status=="in_progress" or .status=="requested" or .status=="pending" or .status=="action_required") | .databaseId')
+            for id in $IDS; do
+              echo "Cancelling $workflow run $id"
+              gh run cancel "$id" || echo "  (run $id already finished)"
+            done
+          done <<< "$WORKFLOWS"

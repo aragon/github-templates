@@ -176,7 +176,9 @@ resolves them centrally. No vault layout is hardcoded in the modules.
   release workflow (`release-self.yml`) — the repo dogfoods the very modules it ships.
 - **Consumers pin to a full commit SHA** (with a `# vX.Y.Z` comment) and rely on **Dependabot**
   (`github-actions` ecosystem) to auto-open bump PRs. This keeps the supply chain pinned while still
-  propagating security patches quickly — merge the Dependabot PR and the fix lands.
+  propagating security patches quickly — merge the Dependabot PR and the fix lands. Right after a
+  migration the consumers reference `@main` instead, so a fix lands once for every repo while the
+  modules settle; the pin is a follow-up once they do.
 - This module drop is **additive** to `steps/credential-retrieval`: the existing `alltoenv` / `alltofile`
   bulk-load behavior is unchanged, so `@v0.4` SHA pins in app / app-backend / gov-ui-kit keep working.
   What's new is `mode: byref` (§4), consumed only by the reusable workflows in this same PR. New tag:
@@ -229,13 +231,27 @@ workflow** cannot (it runs in the caller's checkout), so the one such call site 
 ### `.github/workflows/` — reusable workflows (`workflow_call`)
 | Module | Purpose |
 |---|---|
-| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root; monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages`; optional `require-version-above-latest-tag` (stale-lineage guard), `body-extras` (caller block in PR body + Slack), `op-slack-codeowners-group-path` (subteam ping) |
+| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root → Linear release (`sync` + `in_progress`); monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages`; optional `require-version-above-latest-tag` (stale-lineage guard), `body-extras` (caller block in PR body + Slack), `op-slack-codeowners-group-path` (subteam ping), `on-active-release: skip` (scheduled trains green-skip; every skip is posted to the channel with the manual-run link) |
 | `release-pr-refresh.yml` | on release-PR push (opened/synchronize/reopened): regenerate the history summary (incl. the ⚠️ open-tickets warning) and rewrite the PR body, re-appending the `slack_ts` marker so Slack threading survives; with the optional `op-slack-*` paths it also edits the Slack head message in place (`chat.update`), and `body-extras` re-appends the caller block. History mode only — `packages` summaries detect bumps via dirty files and cannot be re-derived after the release commit |
-| `release-finalize.yml` | on release-PR merge: tag (the *only* tagging point) + GitHub Release + notify. The caller picks the tag target via `sha` — the PR head SHA (the staging-**tested** commit, recommended) or the merge SHA (linear-history repos); optional `changesets-guard` |
-| `deploy-vercel.yml` | Vercel build+deploy; `VERCEL_TOKEN` referenced only here; optional domain alias, `workspace` for monorepos, runtime env lifting, Sentry source maps |
-| `deploy-docker.yml` | build-on-server Docker-over-SSH deploy to an environment; optional Slack gate/result ceremony (`gate-ts` output for rollback threading, gate job never blocks the deploy) and `op-env-vault` env-file materialization |
-| `e2e.yml` | Playwright smoke/BV runner + result parsing + report artifact; `working-directory` for monorepos; wallet/extension suites via the optional generics `env-secret-refs` (+ optional `OP_SERVICE_ACCOUNT_TOKEN`), `pre-test-command`, `use-xvfb`, `extra-cache-path` |
+| `release-finalize.yml` | on release-PR merge: tag (the *only* tagging point) + GitHub Release + the two thread messages ("PR merged, tagging…", "GitHub Release created" + `after-release-note`). The caller picks the tag target via `sha` — the PR head SHA (the staging-**tested** commit, recommended) or the merge SHA (linear-history repos); optional `changesets-guard` |
+| `release-pr-cancel.yml` | on release-PR close without merge: thread message, head message flipped to Cancelled (summary kept), Linear release → `canceled`; `cancel-waiting-runs-of` cancels the PR's runs still paused on an environment approval |
+| `release-complete.yml` | once the tag is live: head message flipped to Completed with the environment link, Linear release → complete. Called after the production deploy / the npm publish |
+| `notify.yml` | the ceremony texts (§9): `start`, `gate`, `result`, `tests`, `failure`, `message`; thread resolution from an explicit ts, a PR number or a release tag; returns the thread root ts |
+| `deploy-vercel.yml` | Vercel build+deploy; `VERCEL_TOKEN` referenced only here; optional domain alias, `workspace` for monorepos, `op-build-secret-refs` (build-only secrets), runtime env lifting, Sentry source maps; output guarded against mask scrubbing; ceremony via `notify.yml` with `gated` |
+| `deploy-docker.yml` | build-on-server Docker-over-SSH deploy to an environment; `prepare-command` (repo-specific config materialization with the `op` CLI at hand) and `op-env-vault`; ceremony via `notify.yml` with `gated` (`gate-ts` output for rollback threading) |
+| `e2e.yml` | Playwright smoke/BV runner + result parsing + report artifact; `working-directory` for monorepos; wallet/extension suites via the optional generics `env-secret-refs` (+ optional `OP_SERVICE_ACCOUNT_TOKEN`), `pre-test-command`, `use-xvfb`, `extra-cache-path`; result into the release thread via `notify.yml` |
 | `release-self.yml` | github-templates' own semver + moving-major release (dogfood) |
+
+Every release/deploy workflow ends with a `notify-failure` job (`if: failure()`), so a red run
+reaches the release thread, or the channel when there is no thread yet.
+
+Nesting: the deploy, e2e and release workflows call `notify.yml` as a nested reusable workflow
+(consumer → deploy-vercel → notify is three of the four levels GitHub allows). `notify.yml`,
+`release-pr-cancel.yml` and `release-complete.yml` declare no `permissions` block on purpose — a
+called workflow cannot ask for more than its caller grants. Reading a PR body needs
+`pull-requests: read` on every workflow down the chain or the `op-release-token-path` PAT; the
+deploy and e2e workflows declare `contents: read` only, so under them only the PAT works. Without
+either the lookup warns and the message is posted top-level.
 
 ### Other
 - `examples/` — thin caller workflows per scenario (A/B/C) as copy-paste references for migration.
@@ -245,7 +261,46 @@ workflow** cannot (it runs in the caller's checkout), so the one such call site 
 
 ---
 
-## 9. Migration playbook (downstream — SREDO-695/697/698)
+## 9. The release thread (Slack ceremony) and the Linear mirror
+
+Every release is one Slack thread, the same in every repo. The head message is the release's
+status line and is rewritten in place as the release moves; everything else is a reply.
+
+| Moment | Message | Posted by |
+|---|---|---|
+| start | head: `🚀 Release <tag> — Started` @team, PR link, branch · actor, summary | `release-start` |
+| push to the release PR | head rewritten with the refreshed summary | `release-pr-refresh` |
+| deploy (staging on the PR, production off the release) | `⏳ <Env> build & deploy started…` | `notify` start, from the deploy workflow |
+| environment with required reviewers | `⏸️ Waiting for approval — deploy to <env>` @team + run link | `notify` gate (`gated: true`), beside the deploy job — never ahead of it |
+| deploy done | `✅ Deployed to <env>` + URL + `next-steps`, or `❌ Deploy to <env> failed` + run link | `notify` result |
+| tests | `✅ Smoke tests on <env> passed` + counts + report link | `notify` tests, from `e2e` |
+| merge | `🏷️ PR merged! Creating tag and GitHub Release…`, then `📦 GitHub Release created` + `after-release-note` | `release-finalize` |
+| npm publish | gate + result with `action: publish` (`✅ Published to npm`) | `notify`, from the consumer's inline publish job |
+| live | head: `🎉 Release <tag> — Completed (<env>)` ✅ + link | `release-complete` |
+| closed without merge | `🛑 Release cancelled`; head: `🛑 Release <tag> — Cancelled` | `release-pr-cancel` |
+| start with nothing to cut | top-level `⏭️ Release (<lineage>) — skipped this week` + the reason (no releasable changes since the last tag, or a release PR still open) + the manual-run link; `— not started` without the link on a manual run | `release-start` |
+| any red run | `❌ <what> failed` + run link | `notify-failure` job of every workflow |
+
+The thread id travels as the `<!-- slack_ts: … -->` marker: written into the PR body by
+`release-start`, preserved by `release-pr-refresh`, carried into the GitHub Release body by
+`release-finalize`. A flow finds its thread through whatever handle it holds (`steps/resolve-slack-thread`):
+the PR number on PR events, the release tag on `release: published`, an explicit ts within a run.
+Without a thread the first message opens one and the run threads under it (a manual deploy).
+
+The Linear mirror follows the same moments with `steps/linear-release`: `sync` + `in_progress` at
+start, `canceled` on cancel, `complete` on complete. One Linear release pipeline per release
+lineage, its access key in the repo's vault (`op-linear-pipeline-key-path`); without a key the
+steps are skipped. Linear never fails a release.
+
+Schedules are the consumer's: a cron on the caller plus `on-active-release: skip`, so a train with
+an open release PR or nothing to release green-skips — never silently: the channel gets the ⏭️
+note above with the manual-run link, so a skipped week is visible and anyone who disagrees starts
+the release by hand. Deployable apps start on Monday, published packages on Tuesday, off the top
+of the hour.
+
+---
+
+## 10. Migration playbook (downstream — SREDO-695/697/698)
 
 Per consumer repo, **bottom-up strangler**, pilot `app` first:
 1. Replace leaf actions (`setup`, `slack-notify`, `extract-slack-ts`, changelog/summary helpers) with
@@ -258,7 +313,7 @@ Then repeat for gov-ui-kit / aragon-domain (clone of `app`'s changesets path) an
 
 ---
 
-## 10. Out of scope (follow-up)
+## 11. Out of scope (follow-up)
 - Consumer-repo migrations (the steps above) — SREDO tickets, DevOps-owned.
 - Vercel-side hardening: dedicated project-scoped machine user; a spike on whether OIDC-for-deploy is
   viable for Vercel (likely unsupported today — Vercel OIDC targets the deployed app reaching backends,
