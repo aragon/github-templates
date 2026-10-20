@@ -47,7 +47,8 @@ on:
         description: |
           1Password vault holding the Vercel credentials. Expects three items in that vault, named
           exactly VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID, each with a `credential`
-          field (e.g. op://kv_app_infra/VERCEL_PROJECT_ID/credential). With
+          field (e.g. op://kv_app_infra/VERCEL_PROJECT_ID/credential). VERCEL_TOKEN may be a
+          classic, team or project-scoped token (the scope is detected at run time). With
           upload-sentry-source-maps, also SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT.
         required: true
         type: string
@@ -267,6 +268,26 @@ jobs:
             SENTRY_PROJECT=${{ inputs.upload-sentry-source-maps && format('op://{0}/SENTRY_PROJECT/credential', inputs.op-infra-vault) || '' }}
             SUBMODULES_TOKEN=${{ inputs.op-submodules-token-path }}
 
+      # Project-scoped tokens can only reach their own project: `--scope` (resolves the user and
+      # the team), `vercel pull` (looks up the owner team) and `vercel alias` (loads the user) all
+      # fail with them. Classic and team tokens keep the CLI path unchanged; project tokens skip
+      # `--scope` and take the REST fallbacks in the pull and alias steps, linked by
+      # VERCEL_ORG_ID/VERCEL_PROJECT_ID.
+      - name: Detect Vercel token scope
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $VERCEL_TOKEN" https://api.vercel.com/v2/user)
+          case "$status" in
+            200) echo "VERCEL_PROJECT_TOKEN=false" >> "$GITHUB_ENV" ;;
+            403|404) echo "VERCEL_PROJECT_TOKEN=true" >> "$GITHUB_ENV" ;;
+            *)
+              echo "::error::Unexpected HTTP $status from the Vercel API while detecting the token scope" >&2
+              exit 1
+              ;;
+          esac
+
       # Build-only secrets (e.g. a token for a private repository the build reads), named by the
       # caller. Exported job-wide and masked; the runtime lift below only reads <workspace>/.env,
       # so they never reach the deployment.
@@ -351,7 +372,21 @@ jobs:
           set -euo pipefail
           VERCEL_ENV="preview"
           if [ "$PROD" = "true" ]; then VERCEL_ENV="production"; fi
-          pnpm vercel pull --yes --environment="$VERCEL_ENV" --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+          if [ "$VERCEL_PROJECT_TOKEN" != "true" ]; then
+            pnpm vercel pull --yes --environment="$VERCEL_ENV" --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+            exit 0
+          fi
+          # The two files `vercel pull` writes, fetched from the same project-level endpoints.
+          auth="Authorization: Bearer $VERCEL_TOKEN"
+          mkdir -p .vercel
+          curl -fsS -H "$auth" "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" \
+            | jq --arg orgId "$VERCEL_ORG_ID" '{projectId: .id, orgId: $orgId, projectName: .name,
+                settings: {createdAt, framework, devCommand, installCommand, buildCommand,
+                  outputDirectory, rootDirectory, directoryListing, nodeVersion}}' > .vercel/project.json
+          curl -fsS -H "$auth" "https://api.vercel.com/v3/env/pull/$VERCEL_PROJECT_ID/$VERCEL_ENV?teamId=$VERCEL_ORG_ID" \
+            | jq -r '"# Created by Vercel CLI", (.env | to_entries | sort_by(.key) | .[]
+                | select(.key | IN("VERCEL_ANALYTICS_ID", "VERCEL_SPEED_INSIGHTS_ID", "VERCEL_WEB_ANALYTICS_ID") | not)
+                | "\(.key)=\"\(.value // "" | gsub("\n"; "\\n") | gsub("\r"; "\\r"))\"")' > ".vercel/.env.$VERCEL_ENV.local"
 
       - name: Set Vercel root directory
         if: inputs.patch-root-directory
@@ -369,7 +404,9 @@ jobs:
           set -euo pipefail
           PROD_ARG=""
           if [ "$PROD" = "true" ]; then PROD_ARG="--prod"; fi
-          pnpm vercel build $PROD_ARG --yes --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+          scope_args=()
+          if [ "$VERCEL_PROJECT_TOKEN" != "true" ]; then scope_args=(--scope "$VERCEL_SCOPE"); fi
+          pnpm vercel build $PROD_ARG --yes --token="$VERCEL_TOKEN" ${scope_args[@]+"${scope_args[@]}"}
 
       - name: Upload source maps to Sentry
         if: inputs.upload-sentry-source-maps
@@ -439,10 +476,12 @@ jobs:
             PROD_ARG="--prod"
             SKIP_DOMAIN="--skip-domain"
           fi
+          scope_args=()
+          if [ "$VERCEL_PROJECT_TOKEN" != "true" ]; then scope_args=(--scope "$VERCEL_SCOPE"); fi
           # `vercel deploy` writes progress to stderr and the URL to stdout — take the last line so
           # an extra line can never turn the output into a malformed multi-line entry, and stop
           # here if there is no URL at all rather than aliasing an empty one below.
-          URL="$(pnpm vercel deploy --prebuilt $PROD_ARG $SKIP_DOMAIN ${runtime_args[@]+"${runtime_args[@]}"} --yes --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE" | tail -n 1)"
+          URL="$(pnpm vercel deploy --prebuilt $PROD_ARG $SKIP_DOMAIN ${runtime_args[@]+"${runtime_args[@]}"} --yes --token="$VERCEL_TOKEN" ${scope_args[@]+"${scope_args[@]}"} | tail -n 1)"
           if [ -z "$URL" ]; then
             echo "::error::vercel deploy printed no deployment URL" >&2
             exit 1
@@ -457,7 +496,22 @@ jobs:
           VERCEL_PROJECT_ID: ${{ fromJSON(steps.op.outputs.secrets).VERCEL_PROJECT_ID }}
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.deploymentUrl }}
           DOMAIN: ${{ inputs.domain }}
-        run: pnpm vercel alias "$DEPLOYMENT_URL" "$DOMAIN" --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+        run: |
+          set -euo pipefail
+          if [ "$VERCEL_PROJECT_TOKEN" != "true" ]; then
+            pnpm vercel alias "$DEPLOYMENT_URL" "$DOMAIN" --token="$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+            exit 0
+          fi
+          # The request `vercel alias` makes; like the CLI, 409 (alias already assigned) is a success.
+          status=$(curl -sS -o alias-response.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+            -d "{\"alias\":\"$DOMAIN\"}" \
+            "https://api.vercel.com/v2/deployments/${DEPLOYMENT_URL#https://}/aliases?teamId=$VERCEL_ORG_ID")
+          if [ "$status" != "200" ] && [ "$status" != "409" ]; then
+            echo "::error::Assigning $DOMAIN failed with HTTP $status: $(cat alias-response.json)" >&2
+            exit 1
+          fi
+          echo "https://$DOMAIN now points to $DEPLOYMENT_URL"
 
   # The runner drops a job output whose value contains a masked substring ("Skip output ... since
   # it may contain secret"), so a successful deploy can still hand callers an empty URL — a broken
