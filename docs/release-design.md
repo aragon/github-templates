@@ -288,9 +288,11 @@ the PR number on PR events, the release tag on `release: published`, an explicit
 Without a thread the first message opens one and the run threads under it (a manual deploy).
 
 The Linear mirror follows the same moments with `steps/linear-release`: `sync` + `in_progress` at
-start, `canceled` on cancel, `complete` on complete. One Linear release pipeline per release
-lineage, its access key in the repo's vault (`op-linear-pipeline-key-path`); without a key the
-steps are skipped. Linear never fails a release.
+start, `canceled` on cancel, `complete` on complete. The sync scans from the previous release tag
+(the summary's boundary), not from the pipeline's last release, so a fresh pipeline's first
+release is linked in full. One Linear release pipeline per release lineage, its access key in the
+repo's vault (`op-linear-pipeline-key-path`); without a key the steps are skipped. Linear never
+fails a release.
 
 Schedules are the consumer's: a cron on the caller plus `on-active-release: skip`, so a train with
 an open release PR or nothing to release green-skips — never silently: the channel gets the ⏭️
