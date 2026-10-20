@@ -13,6 +13,8 @@ const markdownToMrkdwn = (text) => {
         text
             // Convert links: [text](url) -> <url|text>
             .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>')
+            // Convert bold: **text** -> *text* (mrkdwn renders ** literally)
+            .replace(/\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*/g, '*$1*')
             // Convert headers: ## Header -> *Header*
             .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
             // Convert list items: - item -> • item
@@ -76,6 +78,8 @@ const sendMessage = (token, channel, text, threadTs, updateTs) =>
         req.write(data);
         req.end();
     });
+
+module.exports = { isValidSlackTs, markdownToMrkdwn };
 
 // Standalone runner
 if (require.main === module) {
