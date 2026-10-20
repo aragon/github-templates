@@ -331,10 +331,12 @@ jobs:
       # Workspace packages that ship a built `dist/` must be compiled before `vercel build`: the
       # lambda resolves them via package.json exports, and Node cannot execute the TypeScript
       # source under packages/*/src. The `{dir}^...` filter selects only the dependencies of the
-      # workspace (never the workspace itself) and is a no-op for workspaces without buildable deps.
+      # workspace (never the workspace itself); `--if-present` skips the dependencies that have no
+      # build script — pnpm fails on them when the selection is a single package, e.g. a workspace
+      # whose only dependency is a source-only package.
       - name: Build workspace dependencies
         if: inputs.workspace != '.'
-        run: pnpm --filter "{$WORKSPACE}^..." build
+        run: pnpm --filter "{$WORKSPACE}^..." run --if-present build
 
       # Vercel never builds from git here: the artifact is built in this job and uploaded as-is
       # (deploy --prebuilt). All vercel commands run from the repo root so bundlers treat the pnpm
