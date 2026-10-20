@@ -8,6 +8,7 @@ const {
     collectScopedCommits,
     detectLatestTag,
     generateSummary,
+    isSafeTagGlob,
     linearAuthorization,
     readPathFilter,
     resolveCommitTitle,
@@ -174,6 +175,16 @@ test('monorepo: keeps release-window commits and excludes everything the package
     } finally {
         fs.rmSync(repository, { recursive: true, force: true });
     }
+});
+
+test('accepts the glob syntax the release workflows build, refuses shell metacharacters', () => {
+    assert.equal(isSafeTagGlob('v*'), true);
+    assert.equal(isSafeTagGlob('v[0-9]*'), true);
+    assert.equal(isSafeTagGlob('@aragon/app@[0-9]*'), true);
+    assert.equal(isSafeTagGlob('v?.?.?'), true);
+    assert.equal(isSafeTagGlob('v*;rm -rf .'), false);
+    assert.equal(isSafeTagGlob('v$(id)*'), false);
+    assert.equal(isSafeTagGlob(''), false);
 });
 
 test('single-package: v* boundary, no path filter, drops both release-commit styles', () => {

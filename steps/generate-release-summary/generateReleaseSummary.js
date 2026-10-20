@@ -25,6 +25,11 @@ const runGit = (args, options = {}) => {
 const GIT_REF_RE = /^[A-Za-z0-9@._/-]{1,255}$/;
 const isSafeGitRef = (ref) => typeof ref === 'string' && GIT_REF_RE.test(ref);
 
+// A tag glob is a ref with glob syntax: '*', '?' and bracket classes like '[0-9]'. Each glob
+// token stands for ref characters, so it is replaced by one before the ref check.
+const isSafeTagGlob = (glob) =>
+    typeof glob === 'string' && isSafeGitRef(glob.replace(/\[[^\]]*\]|[*?]/g, 'x'));
+
 // owner/repo used to linkify PR numbers. Validate strictly; fall back to a non-linking
 // placeholder if the env value is malformed so we never build a broken/injected URL.
 const resolveRepo = () => {
@@ -326,7 +331,7 @@ const generateSummary = async ({ core }) => {
     const repo = resolveRepo();
     let baseRef = process.env.BASE_REF;
 
-    if (!isSafeGitRef(tagGlob.replace(/\*/g, 'x'))) {
+    if (!isSafeTagGlob(tagGlob)) {
         throw new Error(`Refusing unsafe tag glob: ${tagGlob}`);
     }
 
@@ -422,6 +427,7 @@ module.exports = {
     commitMatchesPathFilter,
     detectLatestTag,
     generateSummary,
+    isSafeTagGlob,
     linearAuthorization,
     readPathFilter,
     resolveCommitTitle,
