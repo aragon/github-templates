@@ -204,7 +204,7 @@ versus the per-repo originals, which assumed the script lived in the same checko
 | Module | Purpose | Key inputs → outputs |
 |---|---|---|
 | `credential-retrieval` *(existing, extended)* | the only module that talks to 1Password: bulk vault → env/file, or named `op://` refs → JSON | `op-token`, `mode`, `op-vault` (bulk modes), `secret-refs` (`byref`) → `secrets` (JSON, `byref`) |
-| `setup` | checkout + pnpm + Node + install | `ref`, `node-version`, `registry-url` |
+| `setup` | checkout + pnpm + Node (`.nvmrc` when present) + install | `ref`, `node-version-file`, `node-version`, `registry-url` |
 | `compute-version` | next version + bump + changelog(s); scope→`--ignore` inversion in monorepos | `engine`, `package-dir`, `scope`/`ignore-packages`, `tag-prefix`, `prettier-changelog` → `version`, `released`, `tag` |
 | `generate-release-summary` | git-log → categorised summary (+Linear); per-package tag boundary + path filtering | `tag-glob`, `path-filter`/`path-patterns`, `linear-api-token`, `base-ref`, `repo` → `summary` |
 | `generate-version-summary` | per-package `## name@version` + CHANGELOG sections after `changeset version` | `scope`/`packages`/`package-dir` → `summary` |
@@ -288,9 +288,11 @@ the PR number on PR events, the release tag on `release: published`, an explicit
 Without a thread the first message opens one and the run threads under it (a manual deploy).
 
 The Linear mirror follows the same moments with `steps/linear-release`: `sync` + `in_progress` at
-start, `canceled` on cancel, `complete` on complete. One Linear release pipeline per release
-lineage, its access key in the repo's vault (`op-linear-pipeline-key-path`); without a key the
-steps are skipped. Linear never fails a release.
+start, `canceled` on cancel, `complete` on complete. The sync scans from the previous release tag
+(the summary's boundary), not from the pipeline's last release, so a fresh pipeline's first
+release is linked in full. One Linear release pipeline per release lineage, its access key in the
+repo's vault (`op-linear-pipeline-key-path`); without a key the steps are skipped. Linear never
+fails a release.
 
 Schedules are the consumer's: a cron on the caller plus `on-active-release: skip`, so a train with
 an open release PR or nothing to release green-skips — never silently: the channel gets the ⏭️
