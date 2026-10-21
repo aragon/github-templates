@@ -204,7 +204,7 @@ versus the per-repo originals, which assumed the script lived in the same checko
 | Module | Purpose | Key inputs → outputs |
 |---|---|---|
 | `credential-retrieval` *(existing, extended)* | the only module that talks to 1Password: bulk vault → env/file, or named `op://` refs → JSON | `op-token`, `mode`, `op-vault` (bulk modes), `secret-refs` (`byref`) → `secrets` (JSON, `byref`) |
-| `setup` | checkout + pnpm + Node + install | `ref`, `node-version`, `registry-url` |
+| `setup` | checkout + pnpm + Node (`.nvmrc` when present) + install | `ref`, `node-version-file`, `node-version`, `registry-url` |
 | `compute-version` | next version + bump + changelog(s); scope→`--ignore` inversion in monorepos | `engine`, `package-dir`, `scope`/`ignore-packages`, `tag-prefix`, `prettier-changelog` → `version`, `released`, `tag` |
 | `generate-release-summary` | git-log → categorised summary (+Linear); per-package tag boundary + path filtering | `tag-glob`, `path-filter`/`path-patterns`, `linear-api-token`, `base-ref`, `repo` → `summary` |
 | `generate-version-summary` | per-package `## name@version` + CHANGELOG sections after `changeset version` | `scope`/`packages`/`package-dir` → `summary` |
