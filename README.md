@@ -42,7 +42,7 @@ downloads, an inline npm publish). Nothing that a single repo needs belongs here
 | `linear-release` | mirror a release into a Linear release pipeline: `sync` (optionally from an explicit `base-ref`), `update` (stage), `complete`; a no-op without an access key |
 | `parse-playwright-results` | classify a Playwright JSON report |
 | `gh-ensure-pr` / `gh-ensure-tag` / `gh-ensure-release` | idempotent PR / tag / release |
-| `gh-ensure-pr-comment` | one tagged PR comment that reruns edit in place (preview URLs, test results) |
+| `gh-ensure-pr-comment` | one tagged PR comment that reruns edit in place (preview URLs, test results); `repository` targets another repo's PR |
 | `git-ensure-branch` | idempotent branch from a base ref — for consumer flows only (`release-start.yml` names its branch inline); a hotfix flow, which stays in the consumer, is the caller |
 | `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / write |
 | `workflow-guards` | fail on a job GitHub skips by surprise: no status function in its `if`, after a job that runs on a `!cancelled()` guard past a skipped ancestor |

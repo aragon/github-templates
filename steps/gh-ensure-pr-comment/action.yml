@@ -15,6 +15,13 @@ inputs:
     description: Pull request number (defaults to the PR that triggered the run)
     required: false
     default: ${{ github.event.pull_request.number }}
+  repository:
+    description: |
+      Repository (owner/name) the pull request lives in. Defaults to the repository running the
+      workflow. To comment on another repository's PR, pass its pr-number too, and a token with
+      pull-requests write access there (e.g. a GitHub App installation token).
+    required: false
+    default: ${{ github.repository }}
 
 runs:
   using: composite
@@ -24,7 +31,7 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         MESSAGE: ${{ inputs.message }}
         PR_NUMBER: ${{ inputs.pr-number }}
-        REPO: ${{ github.repository }}
+        REPO: ${{ inputs.repository }}
         # Same marker thollander/actions-comment-pull-request wrote, so comments posted before a
         # consumer switched keep being updated in place.
         MARKER: <!-- thollander/actions-comment-pull-request "${{ inputs.tag }}" -->
@@ -32,6 +39,10 @@ runs:
         set -euo pipefail
         if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
           echo "::error::pr-number must be a number, got '$PR_NUMBER'" >&2
+          exit 1
+        fi
+        if ! [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+          echo "::error::repository must be owner/name, got '$REPO'" >&2
           exit 1
         fi
         BODY_FILE="$(mktemp)"
