@@ -1321,6 +1321,15 @@
             "outputs": [
                 "ts"
             ]
+        },
+        "workflow-guards": {
+            "inputs": {
+                "dirs": {
+                    "required": false,
+                    "default": ".github/workflows"
+                }
+            },
+            "outputs": []
         }
     }
 }
