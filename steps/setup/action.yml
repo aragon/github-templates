@@ -47,11 +47,14 @@ inputs:
     required: false
     default: ""
   node-version:
-    description: "The version of Node.js to use (ignored when node-version-file is set)"
+    description: "The version of Node.js to use when no version file applies (see node-version-file)"
     required: false
     default: "24"
   node-version-file:
-    description: "Path to a file containing the Node version (e.g. .nvmrc). Takes precedence over node-version."
+    description: |
+      Path to a file containing the Node version. Takes precedence over node-version. Left empty, the
+      repository's own .nvmrc is used when it exists, so a consumer pins Node once; node-version is
+      the fallback for repositories without one.
     required: false
     default: ""
   node-cache:
@@ -112,11 +115,22 @@ runs:
       shell: bash
       run: corepack enable
 
+    # The version file wins over node-version: the explicit input, else the repository's .nvmrc.
+    - name: Resolve the Node version file
+      id: node-version-file
+      shell: bash
+      env:
+        NODE_VERSION_FILE: ${{ inputs.node-version-file }}
+      run: |
+        file="$NODE_VERSION_FILE"
+        if [ -z "$file" ] && [ -f .nvmrc ]; then file=".nvmrc"; fi
+        echo "file=$file" >> "$GITHUB_OUTPUT"
+
     - name: Setup Node
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
-        node-version-file: ${{ inputs.node-version-file }}
+        node-version: ${{ steps.node-version-file.outputs.file == '' && inputs.node-version || '' }}
+        node-version-file: ${{ steps.node-version-file.outputs.file }}
         cache: ${{ inputs.node-cache }}
         registry-url: ${{ inputs.registry-url }}
 

@@ -1174,6 +1174,10 @@
                     "required": false,
                     "default": ""
                 },
+                "base-ref": {
+                    "required": false,
+                    "default": ""
+                },
                 "command": {
                     "required": false,
                     "default": "sync"

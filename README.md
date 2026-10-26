@@ -39,7 +39,7 @@ downloads, an inline npm publish). Nothing that a single repo needs belongs here
 | `slack-notify` | post / thread / edit a Slack message |
 | `extract-slack-ts` | parse the `<!-- slack_ts -->` marker from text |
 | `resolve-slack-thread` | find the release thread from an explicit ts, a PR number or a release tag (+ the body without markers) |
-| `linear-release` | mirror a release into a Linear release pipeline: `sync`, `update` (stage), `complete`; a no-op without an access key |
+| `linear-release` | mirror a release into a Linear release pipeline: `sync` (optionally from an explicit `base-ref`), `update` (stage), `complete`; a no-op without an access key |
 | `parse-playwright-results` | classify a Playwright JSON report |
 | `gh-ensure-pr` / `gh-ensure-tag` / `gh-ensure-release` | idempotent PR / tag / release |
 | `gh-ensure-pr-comment` | one tagged PR comment that reruns edit in place (preview URLs, test results) |

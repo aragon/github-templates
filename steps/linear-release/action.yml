@@ -4,7 +4,8 @@ description: |
   the release and links the issues the commits reference, `update` moves it to a stage
   (`in_progress`, `canceled`), `complete` marks it released. Linear is a mirror, never a gate: the
   step is skipped without an access key and a Linear error only warns. `sync` scans the git
-  history, so the checkout must have full depth.
+  history from `base-ref` (or, without one, from the pipeline's last release — the current commit
+  alone when the pipeline has none yet), so the checkout must have full depth.
 
 inputs:
   access-key:
@@ -20,6 +21,10 @@ inputs:
     required: true
   stage:
     description: "Stage for 'update' (in_progress, canceled)"
+    required: false
+    default: ""
+  base-ref:
+    description: "Exclusive lower bound of the 'sync' scan (<base-ref>..HEAD), e.g. the previous release tag; empty lets the CLI pick the pipeline's last release"
     required: false
     default: ""
 
@@ -57,3 +62,4 @@ runs:
         version: ${{ inputs.version }}
         name: ${{ inputs.command == 'sync' && inputs.version || '' }}
         stage: ${{ inputs.stage }}
+        base_ref: ${{ inputs.command == 'sync' && inputs.base-ref || '' }}

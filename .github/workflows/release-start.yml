@@ -502,9 +502,20 @@ jobs:
 
             ${{ inputs.body-extras }}
 
-      # Mirror into Linear: the release is created with its issues linked (sync scans the history
-      # since the previous tag) and moved to in_progress; only when the named package was bumped,
-      # since the Linear version is the tag. Linear never fails a release that is already cut.
+      # Mirror into Linear: the release is created with its issues linked and moved to in_progress;
+      # only when the named package was bumped, since the Linear version is the tag. The sync scans
+      # from the latest '<tag-prefix>*' tag — the summary's boundary — not from the pipeline's last
+      # release: a fresh pipeline has none, and its first sync would then cover the release commit
+      # alone. Linear never fails a release that is already cut.
+      - name: Resolve the previous release tag
+        id: previous-tag
+        if: ${{ steps.version.outputs.released == 'true' && steps.version.outputs.tag != '' && inputs.op-linear-pipeline-key-path != '' }}
+        env:
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+          echo "tag=$(git tag --list "${TAG_PREFIX}[0-9]*" --sort=-v:refname | head -n 1)" >> "$GITHUB_OUTPUT"
+
       - name: Linear — create the release
         if: ${{ steps.version.outputs.released == 'true' && steps.version.outputs.tag != '' && inputs.op-linear-pipeline-key-path != '' }}
         uses: aragon/github-templates/steps/linear-release@main
@@ -512,6 +523,7 @@ jobs:
           access-key: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_PIPELINE_ACCESS_KEY }}
           command: sync
           version: ${{ steps.version.outputs.tag }}
+          base-ref: ${{ steps.previous-tag.outputs.tag }}
 
       - name: Linear — move the release to in_progress
         if: ${{ steps.version.outputs.released == 'true' && steps.version.outputs.tag != '' && inputs.op-linear-pipeline-key-path != '' }}
