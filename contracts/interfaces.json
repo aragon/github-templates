@@ -1300,6 +1300,10 @@
         },
         "slack-notify": {
             "inputs": {
+                "cut-link": {
+                    "required": false,
+                    "default": ""
+                },
                 "message": {
                     "required": true
                 },

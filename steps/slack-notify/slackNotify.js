@@ -17,20 +17,25 @@ const markdownToMrkdwn = (text) => {
             .replace(/\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*/g, '*$1*')
             // Convert headers: ## Header -> *Header*
             .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
-            // Convert list items: - item -> • item
-            .replace(/^-\s+/gm, '• ')
+            // Convert list items, either marker, any nesting: - item / * item -> • item
+            .replace(/^(\s*)[-*]\s+/gm, '$1• ')
     );
 };
 
 // chat.update rejects `text` over 4,000 characters (`msg_too_long`), and a long
 // release changelog gets there. The body is cut at the last line break that fits,
-// so no mrkdwn link is split, and the cut is marked. A short closing paragraph
-// survives the cut: release flags such as the DB-migration warning live there.
+// so no mrkdwn link is split, and the cut is marked — with a link to the full text
+// (the PR, the GitHub release) when the caller passes one. A short closing
+// paragraph survives the cut: release flags such as the DB-migration warning live
+// there.
 const MAX_TEXT_LENGTH = 4000;
 const MAX_KEPT_TAIL_LENGTH = 500;
 const TRUNCATION_MARK = '\n… (truncated)';
 
-const truncateText = (text, limit = MAX_TEXT_LENGTH) => {
+const truncationMark = (cutLink) =>
+    cutLink ? `\n… the rest is in ${cutLink}` : TRUNCATION_MARK;
+
+const truncateText = (text, limit = MAX_TEXT_LENGTH, mark = TRUNCATION_MARK) => {
     if (text.length <= limit) {
         return text;
     }
@@ -43,9 +48,9 @@ const truncateText = (text, limit = MAX_TEXT_LENGTH) => {
         tailStart > 0 && trimmed.length - tailStart <= MAX_KEPT_TAIL_LENGTH
             ? trimmed.slice(tailStart)
             : '';
-    const room = limit - TRUNCATION_MARK.length - tail.length;
+    const room = limit - mark.length - tail.length;
     const lineEnd = trimmed.lastIndexOf('\n', room);
-    return `${trimmed.slice(0, lineEnd > 0 ? lineEnd : room)}${TRUNCATION_MARK}${tail}`;
+    return `${trimmed.slice(0, lineEnd > 0 ? lineEnd : room)}${mark}${tail}`;
 };
 
 // Sanitize untrusted values before logging to avoid log-forging/control chars.
@@ -113,7 +118,7 @@ const sendMessage = (token, channel, text, threadTs, updateTs) =>
         req.end();
     });
 
-module.exports = { isValidSlackTs, markdownToMrkdwn, truncateText };
+module.exports = { isValidSlackTs, markdownToMrkdwn, truncateText, truncationMark };
 
 // Standalone runner
 if (require.main === module) {
@@ -138,7 +143,8 @@ if (require.main === module) {
     console.log('Sending Slack notification.');
 
     const text = markdownToMrkdwn(message);
-    const fittedText = truncateText(text);
+    const cutLink = markdownToMrkdwn(process.env.SLACK_CUT_LINK || '').trim();
+    const fittedText = truncateText(text, MAX_TEXT_LENGTH, truncationMark(cutLink));
     if (fittedText.length < text.trimEnd().length) {
         console.log(
             `::warning::Slack message truncated from ${text.length} to ${fittedText.length} characters.`,
