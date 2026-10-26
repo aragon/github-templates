@@ -152,7 +152,11 @@ if (require.main === module) {
             }
         })
         .catch((error) => {
-            console.error(`Failed to send Slack message: ${error.message}`);
+            const safeErrorMessage = String(error?.message ?? error).replace(
+                /[\r\n]+/g,
+                ' ',
+            );
+            console.error(`Failed to send Slack message: ${safeErrorMessage}`);
             process.exit(1);
         });
 }
