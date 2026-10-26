@@ -45,6 +45,7 @@ downloads, an inline npm publish). Nothing that a single repo needs belongs here
 | `gh-ensure-pr-comment` | one tagged PR comment that reruns edit in place (preview URLs, test results) |
 | `git-ensure-branch` | idempotent branch from a base ref — for consumer flows only (`release-start.yml` names its branch inline); a hotfix flow, which stays in the consumer, is the caller |
 | `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / write |
+| `workflow-guards` | fail on a job GitHub skips by surprise: no status function in its `if`, after a job that runs on a `!cancelled()` guard past a skipped ancestor |
 
 ### Reusable workflows (`.github/workflows/`)
 
@@ -110,6 +111,11 @@ every reusable workflow now uses instead of calling `1password/load-secrets-acti
   test suite fails on unregistered additions and on breaking changes (see `contracts/README.md`).
 - Run **Self-test (steps)** (`.github/workflows/_selftest.yml`, manual dispatch) to smoke-test the
   leaf actions.
+- A job with a skipped job anywhere in its `needs` chain is skipped too, unless its `if` carries a
+  status function (`always()`, `!cancelled()`, `failure()`). So every job after one that runs on
+  such a guard needs one as well — `if: ${{ !cancelled() && needs.<job>.result == 'success' }}` —
+  or GitHub skips it even though its parent succeeded. `steps/workflow-guards` checks this; CI
+  runs it over this repo's workflows and examples, consumers run it over theirs.
 - Inside a **reusable workflow**, reference composite actions by their **fully-qualified** path
   (`aragon/github-templates/steps/foo@<ref>`) — a relative `./steps/foo` would resolve against the
   caller repo. In-repo workflows (like `_selftest`/`release-self`) may use `./steps/foo`.

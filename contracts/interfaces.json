@@ -1300,6 +1300,10 @@
         },
         "slack-notify": {
             "inputs": {
+                "cut-link": {
+                    "required": false,
+                    "default": ""
+                },
                 "message": {
                     "required": true
                 },
@@ -1321,6 +1325,15 @@
             "outputs": [
                 "ts"
             ]
+        },
+        "workflow-guards": {
+            "inputs": {
+                "dirs": {
+                    "required": false,
+                    "default": ".github/workflows"
+                }
+            },
+            "outputs": []
         }
     }
 }

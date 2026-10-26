@@ -189,8 +189,9 @@ jobs:
           [ -n "$TEAM" ] && ping=" <!subteam^${TEAM}>"
           version_line=""
           [ -n "$VERSION" ] && version_line=$'\n'"*Version:* \`${VERSION}\`"
+          # The ref is the version itself when a tag deploys (production); say it once then.
           ref_line=""
-          [ -n "$REF" ] && ref_line=$'\n'"*Ref:* \`${REF}\`"
+          [ -n "$REF" ] && [ "$REF" != "$VERSION" ] && ref_line=$'\n'"*Ref:* \`${REF}\`"
           case "$ACTION" in
             deploy)  doing="build & deploy"; done_="Deployed to" ;;
             publish) doing="publish";        done_="Published to" ;;

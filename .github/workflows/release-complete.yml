@@ -91,6 +91,7 @@ jobs:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           update-ts: ${{ steps.thread.outputs.ts }}
+          cut-link: "[the release](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }})"
           message: |
             🎉 *Release ${{ inputs.tag }} — Completed (${{ inputs.env }})* ✅${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
             ${{ inputs.url != '' && format('*{0}:* {1}', inputs.env, inputs.url) || '' }}

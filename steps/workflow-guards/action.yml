@@ -1,0 +1,22 @@
+name: Workflow Guards
+description: |
+  Fails when a workflow has a job that GitHub skips by surprise: a job without a status function
+  (`always()`, `!cancelled()`, `failure()`) in its `if` that depends on a job which carries one and
+  so runs even when an earlier job in the chain was skipped. GitHub skips the dependent job then,
+  no matter that its parent succeeded. Run it on every PR next to the unit tests.
+
+inputs:
+  dirs:
+    description: "Whitespace-separated directories holding the workflows to check"
+    required: false
+    default: ".github/workflows"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        WORKFLOW_DIRS: ${{ inputs.dirs }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/workflowGuards.js"

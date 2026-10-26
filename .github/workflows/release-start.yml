@@ -329,6 +329,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           ACTOR: ${{ github.actor }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          REPO: ${{ github.repository }}
           WORKFLOWS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows
         run: |
           set -euo pipefail
@@ -343,9 +344,9 @@ jobs:
           workflow_file="${WORKFLOW_REF%@*}"
           workflow_file="${workflow_file##*/}"
           if [ "$EVENT" = "schedule" ]; then
-            text="⏭️ *Release (${PREFIX}) — skipped this week*"$'\n'"${reason}."$'\n'"Disagree? Start it by hand: [Run workflow](${WORKFLOWS_URL}/${workflow_file})"
+            text="⏭️ *${REPO} release (\`${PREFIX}\`) — skipped this week*"$'\n'"${reason}."$'\n'"Disagree? Start it by hand: [Run workflow](${WORKFLOWS_URL}/${workflow_file})"
           else
-            text="⏭️ *Release (${PREFIX}) — not started* · by ${ACTOR}"$'\n'"${reason}."
+            text="⏭️ *${REPO} release (\`${PREFIX}\`) — not started* · by ${ACTOR}"$'\n'"${reason}."
           fi
           delimiter="ghadelim_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
           { echo "text<<$delimiter"; printf '%s\n' "$text"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
@@ -493,6 +494,7 @@ jobs:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           update-ts: ${{ steps.slack.outputs.ts }}
+          cut-link: "[the PR](${{ steps.pr.outputs.url }})"
           message: |
             🚀 *Release ${{ steps.branch.outputs.label }} — Started*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
             *PR:* ${{ steps.pr.outputs.url }}

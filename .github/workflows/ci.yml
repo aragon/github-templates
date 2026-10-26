@@ -27,3 +27,8 @@ jobs:
 
       - name: Unit tests
         run: node --test 'lib/*.test.js' 'steps/**/*.test.js'
+
+      - name: Check workflow job guards
+        uses: ./steps/workflow-guards
+        with:
+          dirs: .github/workflows examples
