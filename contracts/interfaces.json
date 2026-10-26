@@ -1080,6 +1080,10 @@
                     "required": false,
                     "default": "${{ github.event.pull_request.number }}"
                 },
+                "repository": {
+                    "required": false,
+                    "default": "${{ github.repository }}"
+                },
                 "tag": {
                     "required": true
                 },

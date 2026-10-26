@@ -3,7 +3,7 @@
     "consumers": [
         {
             "repo": "aragon/protocol-doc-ui",
-            "workflowFile": ".github/workflows/deploy-staging.yml",
+            "workflowFile": ".github/workflows/shared-deploy.yml",
             "calls": "deploy-vercel.yml",
             "inputs": [
                 "env",
@@ -11,25 +11,6 @@
                 "domain",
                 "vercel-scope",
                 "op-infra-vault",
-                "op-submodules-token-path",
-                "submodules",
-                "setup-install",
-                "setup-node-cache",
-                "setup-command"
-            ],
-            "secrets": [
-                "OP_SERVICE_ACCOUNT_TOKEN"
-            ]
-        },
-        {
-            "repo": "aragon/protocol-doc-ui",
-            "workflowFile": ".github/workflows/deploy-preview.yml",
-            "calls": "deploy-vercel.yml",
-            "inputs": [
-                "env",
-                "vercel-scope",
-                "op-infra-vault",
-                "op-submodules-token-path",
                 "submodules",
                 "setup-install",
                 "setup-node-cache",
