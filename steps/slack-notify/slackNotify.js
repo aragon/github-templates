@@ -48,6 +48,14 @@ const truncateText = (text, limit = MAX_TEXT_LENGTH) => {
     return `${trimmed.slice(0, lineEnd > 0 ? lineEnd : room)}${TRUNCATION_MARK}${tail}`;
 };
 
+// Sanitize untrusted values before logging to avoid log-forging/control chars.
+const sanitizeForLog = (value) =>
+    String(value ?? '')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[\x00-\x1F\x7F]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
 // Posts a new message, or edits an existing one when `updateTs` is set
 // (chat.update) — used to reflect lifecycle status (started → cancelled →
 // completed) in the release's head message rather than only as thread replies.
@@ -152,10 +160,7 @@ if (require.main === module) {
             }
         })
         .catch((error) => {
-            const safeErrorMessage = String(error?.message ?? error).replace(
-                /[\r\n]+/g,
-                ' ',
-            );
+            const safeErrorMessage = sanitizeForLog(error?.message ?? error);
             console.error(`Failed to send Slack message: ${safeErrorMessage}`);
             process.exit(1);
         });
