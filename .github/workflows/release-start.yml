@@ -494,6 +494,7 @@ jobs:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           update-ts: ${{ steps.slack.outputs.ts }}
+          cut-link: "[the PR](${{ steps.pr.outputs.url }})"
           message: |
             🚀 *Release ${{ steps.branch.outputs.label }} — Started*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
             *PR:* ${{ steps.pr.outputs.url }}

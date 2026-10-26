@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { markdownToMrkdwn, truncateText } = require('./slackNotify');
+const { markdownToMrkdwn, truncateText, truncationMark } = require('./slackNotify');
 
 test('converts markdown bold to mrkdwn and leaves mrkdwn bold alone', () => {
     assert.equal(
@@ -15,6 +15,13 @@ test('converts links, headers and list items', () => {
     assert.equal(
         markdownToMrkdwn('## Features\n- [APP-1: title](https://x.y/z)'),
         '*Features*\n• <https://x.y/z|APP-1: title>',
+    );
+});
+
+test('converts star bullets and nested items, and leaves bold alone', () => {
+    assert.equal(
+        markdownToMrkdwn('* **APP-1332**: repair tool ([c91d3a5](https://x.y/c))\n  * nested\n*Header*'),
+        '• *APP-1332*: repair tool (<https://x.y/c|c91d3a5>)\n  • nested\n*Header*',
     );
 });
 
@@ -46,4 +53,15 @@ test('hard-cuts a single over-limit line', () => {
 
     assert.equal(truncated.length, 4000);
     assert.ok(truncated.endsWith('\n… (truncated)'));
+});
+
+test('marks the cut with a link to the full text when given one', () => {
+    const mark = truncationMark('<https://x.y/pull/1|the PR>');
+    assert.equal(mark, '\n… the rest is in <https://x.y/pull/1|the PR>');
+    assert.equal(truncationMark(''), '\n… (truncated)');
+
+    const list = Array.from({ length: 200 }, () => '• item').join('\n');
+    const truncated = truncateText(list, 100, mark);
+    assert.ok(truncated.length <= 100);
+    assert.ok(truncated.endsWith(mark));
 });

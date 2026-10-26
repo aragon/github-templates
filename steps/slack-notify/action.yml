@@ -19,6 +19,10 @@ inputs:
     description: Slack message ts to EDIT (chat.update) instead of posting a new message
     required: false
     default: ""
+  cut-link:
+    description: "Markdown link to the full text, e.g. `[the PR](url)`: a message over Slack's 4,000 characters is cut and ends with `… the rest is in <link>` (`… (truncated)` without one)"
+    required: false
+    default: ""
 
 outputs:
   ts:
@@ -35,6 +39,7 @@ runs:
         SLACK_CHANNEL_ID: ${{ inputs.slack-channel-id }}
         SLACK_THREAD_TS: ${{ inputs.thread-ts }}
         SLACK_UPDATE_TS: ${{ inputs.update-ts }}
+        SLACK_CUT_LINK: ${{ inputs.cut-link }}
         MESSAGE: ${{ inputs.message }}
       run: |
         set -euo pipefail

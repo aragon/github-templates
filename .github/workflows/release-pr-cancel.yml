@@ -119,6 +119,7 @@ jobs:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
           update-ts: ${{ steps.thread.outputs.ts }}
+          cut-link: "[the PR](${{ github.event.pull_request.html_url }})"
           message: |
             🛑 *${{ github.event.pull_request.title }} — Cancelled*${{ fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID != '' && format(' <!subteam^{0}>', fromJSON(steps.op.outputs.secrets).SLACK_CODEOWNERS_GROUP_ID) || '' }}
             *PR:* [${{ github.event.pull_request.title }}](${{ github.event.pull_request.html_url }})
