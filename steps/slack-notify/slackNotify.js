@@ -22,6 +22,40 @@ const markdownToMrkdwn = (text) => {
     );
 };
 
+// chat.update rejects `text` over 4,000 characters (`msg_too_long`), and a long
+// release changelog gets there. The body is cut at the last line break that fits,
+// so no mrkdwn link is split, and the cut is marked. A short closing paragraph
+// survives the cut: release flags such as the DB-migration warning live there.
+const MAX_TEXT_LENGTH = 4000;
+const MAX_KEPT_TAIL_LENGTH = 500;
+const TRUNCATION_MARK = '\n… (truncated)';
+
+const truncateText = (text, limit = MAX_TEXT_LENGTH) => {
+    if (text.length <= limit) {
+        return text;
+    }
+    const trimmed = text.trimEnd();
+    if (trimmed.length <= limit) {
+        return trimmed;
+    }
+    const tailStart = trimmed.lastIndexOf('\n\n');
+    const tail =
+        tailStart > 0 && trimmed.length - tailStart <= MAX_KEPT_TAIL_LENGTH
+            ? trimmed.slice(tailStart)
+            : '';
+    const room = limit - TRUNCATION_MARK.length - tail.length;
+    const lineEnd = trimmed.lastIndexOf('\n', room);
+    return `${trimmed.slice(0, lineEnd > 0 ? lineEnd : room)}${TRUNCATION_MARK}${tail}`;
+};
+
+// Sanitize untrusted values before logging to avoid log-forging/control chars.
+const sanitizeForLog = (value) =>
+    String(value ?? '')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[\x00-\x1F\x7F]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
 // Posts a new message, or edits an existing one when `updateTs` is set
 // (chat.update) — used to reflect lifecycle status (started → cancelled →
 // completed) in the release's head message rather than only as thread replies.
@@ -79,7 +113,7 @@ const sendMessage = (token, channel, text, threadTs, updateTs) =>
         req.end();
     });
 
-module.exports = { isValidSlackTs, markdownToMrkdwn };
+module.exports = { isValidSlackTs, markdownToMrkdwn, truncateText };
 
 // Standalone runner
 if (require.main === module) {
@@ -103,7 +137,15 @@ if (require.main === module) {
 
     console.log('Sending Slack notification.');
 
-    sendMessage(token, channel, markdownToMrkdwn(message), threadTs, updateTs)
+    const text = markdownToMrkdwn(message);
+    const fittedText = truncateText(text);
+    if (fittedText.length < text.trimEnd().length) {
+        console.log(
+            `::warning::Slack message truncated from ${text.length} to ${fittedText.length} characters.`,
+        );
+    }
+
+    sendMessage(token, channel, fittedText, threadTs, updateTs)
         .then((ts) => {
             if (!isValidSlackTs(ts)) {
                 console.error('Slack returned an invalid ts.');
@@ -117,8 +159,9 @@ if (require.main === module) {
                 console.log(`::set-output name=ts::${ts}`);
             }
         })
-        .catch(() => {
-            console.error('Failed to send Slack message.');
+        .catch((error) => {
+            const safeErrorMessage = sanitizeForLog(error?.message ?? error);
+            console.error(`Failed to send Slack message: ${safeErrorMessage}`);
             process.exit(1);
         });
 }
