@@ -744,6 +744,11 @@
                     "required": true,
                     "type": "string"
                 },
+                "extra-changeset": {
+                    "required": false,
+                    "type": "string",
+                    "default": ""
+                },
                 "git-user-email": {
                     "required": false,
                     "type": "string",

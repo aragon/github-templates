@@ -51,7 +51,7 @@ downloads, an inline npm publish). Nothing that a single repo needs belongs here
 
 | Workflow | Purpose |
 |----------|---------|
-| `release-start.yml` | guard → compute version → cut the release branch → summary → open PR → Slack thread (+ Linear release); optional stale-version guard, `body-extras`, codeowners ping; `on-active-release: skip` for scheduled trains — a skip (open release PR, nothing to release) is posted to the channel with the manual-run link |
+| `release-start.yml` | guard → compute version → cut the release branch → summary → open PR → Slack thread (+ Linear release); optional stale-version guard, `body-extras`, `extra-changeset`, codeowners ping; `on-active-release: skip` for scheduled trains — a skip (open release PR, nothing to release) is posted to the channel with the manual-run link |
 | `release-pr-refresh.yml` | on release-PR push: regenerate the summary (incl. the ⚠️ open-tickets warning), rewrite the PR body preserving the `slack_ts` marker, and optionally edit the Slack head message in place |
 | `release-finalize.yml` | on release-PR merge: tag (the only tagging point) + GitHub Release — the caller picks the tag target (`sha`: tested head vs merge commit) and says what happens next (`after-release-note`) |
 | `release-pr-cancel.yml` | on release-PR close without merge: thread message, head message flipped to Cancelled, Linear release canceled; optionally cancels runs still waiting on an approval |

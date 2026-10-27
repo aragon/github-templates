@@ -122,6 +122,9 @@ Repo-specific quirks plug in through small optional inputs instead of forked wor
   `require-version-above-latest-tag: true` on `release-start`;
 - caller-computed blocks like the backend DB-migration warning ride `body-extras` on
   `release-start` / `release-pr-refresh` (the caller recomputes the block on each refresh);
+- a change no changeset in the repository can describe — the app's docs site publishes pages
+  fetched at build time from another repository — rides `extra-changeset` on `release-start`:
+  the caller computes the changeset, the bump consumes it like the others;
 - app's Synpress build-verification rides the `e2e.yml` generics (`env-secret-refs`,
   `pre-test-command`, `use-xvfb`, `extra-cache-path`).
 What stays in the consumer's thin caller: forward-only rollback policy, hotfix
@@ -231,7 +234,7 @@ workflow** cannot (it runs in the caller's checkout), so the one such call site 
 ### `.github/workflows/` — reusable workflows (`workflow_call`)
 | Module | Purpose |
 |---|---|
-| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root → Linear release (`sync` + `in_progress`); monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages`; optional `require-version-above-latest-tag` (stale-lineage guard), `body-extras` (caller block in PR body + Slack), `op-slack-codeowners-group-path` (subteam ping), `on-active-release: skip` (scheduled trains green-skip; every skip is posted to the channel with the manual-run link) |
+| `release-start.yml` | guard → branch → `compute-version` → summary → open PR → Slack thread root → Linear release (`sync` + `in_progress`); monorepo via `package-dir`/`tag-prefix`/`scope`/`release-branch-prefix`; PR body style via `summary-mode: history\|packages`; optional `require-version-above-latest-tag` (stale-lineage guard), `body-extras` (caller block in PR body + Slack), `extra-changeset` (caller changeset added to the bump), `op-slack-codeowners-group-path` (subteam ping), `on-active-release: skip` (scheduled trains green-skip; every skip is posted to the channel with the manual-run link) |
 | `release-pr-refresh.yml` | on release-PR push (opened/synchronize/reopened): regenerate the history summary (incl. the ⚠️ open-tickets warning) and rewrite the PR body, re-appending the `slack_ts` marker so Slack threading survives; with the optional `op-slack-*` paths it also edits the Slack head message in place (`chat.update`), and `body-extras` re-appends the caller block. History mode only — `packages` summaries detect bumps via dirty files and cannot be re-derived after the release commit |
 | `release-finalize.yml` | on release-PR merge: tag (the *only* tagging point) + GitHub Release + the two thread messages ("PR merged, tagging…", "GitHub Release created" + `after-release-note`). The caller picks the tag target via `sha` — the PR head SHA (the staging-**tested** commit, recommended) or the merge SHA (linear-history repos); optional `changesets-guard` |
 | `release-pr-cancel.yml` | on release-PR close without merge: thread message, head message flipped to Cancelled (summary kept), Linear release → `canceled`; `cancel-waiting-runs-of` cancels the PR's runs still paused on an environment approval |

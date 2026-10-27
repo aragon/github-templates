@@ -662,17 +662,294 @@
         },
         {
             "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-release.yml",
+            "calls": "release-start.yml",
+            "inputs": [
+                "base-ref",
+                "branch-suffix",
+                "commit-message",
+                "engine",
+                "extra-changeset",
+                "on-active-release",
+                "op-gpg-key-path",
+                "op-gpg-passphrase-path",
+                "op-linear-token-path",
+                "op-release-token-path",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "op-slack-codeowners-group-path",
+                "package-dir",
+                "release-branch-prefix",
+                "scope",
+                "summary-path-filter",
+                "tag-prefix"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-release.yml",
+            "calls": "release-pr-refresh.yml",
+            "inputs": [
+                "op-linear-token-path",
+                "op-release-token-path",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "op-slack-codeowners-group-path",
+                "release-branch-prefix",
+                "summary-path-filter",
+                "tag-prefix"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-release.yml",
+            "calls": "deploy-vercel.yml",
+            "inputs": [
+                "domain",
+                "env",
+                "env-overrides",
+                "next-steps",
+                "op-build-secret-refs",
+                "op-env-vault",
+                "op-infra-vault",
+                "op-release-token-path",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "ref",
+                "setup-command",
+                "slack-thread-pr-number",
+                "vercel-scope",
+                "workspace"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-release.yml",
+            "calls": "e2e.yml",
+            "inputs": [
+                "artifact-viewer-host",
+                "deployment-url",
+                "environment",
+                "op-release-token-path",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "slack-thread-pr-number",
+                "test-command",
+                "working-directory"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-release.yml",
+            "calls": "release-finalize.yml",
+            "inputs": [
+                "after-release-note",
+                "changesets-guard",
+                "op-release-token-path",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "package-dir",
+                "pr-body",
+                "sha",
+                "tag-prefix"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-release.yml",
+            "calls": "release-pr-cancel.yml",
+            "inputs": [
+                "op-release-token-path",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "op-slack-codeowners-group-path"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
             "workflowFile": ".github/workflows/docs-production.yml",
             "calls": "deploy-vercel.yml",
             "inputs": [
                 "domain",
                 "env",
+                "env-overrides",
+                "gated",
+                "next-steps",
                 "op-build-secret-refs",
                 "op-env-vault",
                 "op-infra-vault",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "op-slack-codeowners-group-path",
+                "ref",
+                "setup-command",
+                "slack-thread-release-tag",
+                "vercel-scope",
+                "version",
+                "workspace"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-production.yml",
+            "calls": "e2e.yml",
+            "inputs": [
+                "artifact-viewer-host",
+                "deployment-url",
+                "environment",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "slack-thread-release-tag",
+                "test-command",
+                "working-directory"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-production.yml",
+            "calls": "release-complete.yml",
+            "inputs": [
+                "env",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "op-slack-codeowners-group-path",
+                "tag",
+                "url"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-staging.yml",
+            "calls": "deploy-vercel.yml",
+            "inputs": [
+                "domain",
+                "env",
+                "env-overrides",
+                "next-steps",
+                "op-build-secret-refs",
+                "op-env-vault",
+                "op-infra-vault",
+                "op-release-token-path",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "ref",
+                "setup-command",
+                "slack-thread-pr-number",
+                "vercel-scope",
+                "workspace"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-staging.yml",
+            "calls": "e2e.yml",
+            "inputs": [
+                "artifact-viewer-host",
+                "deployment-url",
+                "environment",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "slack-thread-ts",
+                "test-command",
+                "working-directory"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-hotfix-start.yml",
+            "calls": "deploy-vercel.yml",
+            "inputs": [
+                "domain",
+                "env",
+                "env-overrides",
+                "next-steps",
+                "op-build-secret-refs",
+                "op-env-vault",
+                "op-infra-vault",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "ref",
+                "setup-command",
+                "slack-thread-ts",
+                "vercel-scope",
+                "version",
+                "workspace"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-hotfix-start.yml",
+            "calls": "e2e.yml",
+            "inputs": [
+                "artifact-viewer-host",
+                "deployment-url",
+                "environment",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "slack-thread-ts",
+                "test-command",
+                "working-directory"
+            ],
+            "secrets": [
+                "OP_SERVICE_ACCOUNT_TOKEN"
+            ]
+        },
+        {
+            "repo": "aragon/app",
+            "workflowFile": ".github/workflows/docs-rollback.yml",
+            "calls": "deploy-vercel.yml",
+            "inputs": [
+                "domain",
+                "env",
+                "env-overrides",
+                "gated",
+                "next-steps",
+                "op-build-secret-refs",
+                "op-env-vault",
+                "op-infra-vault",
+                "op-slack-bot-token-path",
+                "op-slack-channel-id-path",
+                "op-slack-codeowners-group-path",
                 "ref",
                 "setup-command",
                 "vercel-scope",
+                "version",
                 "workspace"
             ],
             "secrets": [

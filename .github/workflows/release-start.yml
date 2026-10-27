@@ -114,6 +114,15 @@ on:
         required: false
         type: string
         default: ""
+      extra-changeset:
+        description: |
+          Changesets only: a changeset file (frontmatter and summary) the caller adds to the
+          release, written to .changeset/ before the bump — for a change no changeset in the
+          repository can describe, such as content fetched at build time from another repository.
+          A release cuts for it alone. Empty = none.
+        required: false
+        type: string
+        default: ""
       git-user-name:
         description: "Committer name when no GPG key is configured"
         required: false
@@ -280,6 +289,20 @@ jobs:
           set -euo pipefail
           git config user.name "$GIT_USER_NAME"
           git config user.email "$GIT_USER_EMAIL"
+
+      # Consumed by the bump like any other changeset: it reaches the CHANGELOG, not the commit.
+      - name: Add the caller's changeset
+        if: ${{ steps.guard.outputs.proceed == 'true' && inputs.extra-changeset != '' }}
+        env:
+          ENGINE: ${{ inputs.engine }}
+          CHANGESET: ${{ inputs.extra-changeset }}
+        run: |
+          set -euo pipefail
+          if [ "$ENGINE" != "changesets" ]; then
+            echo "::error::'extra-changeset' is changesets-only" >&2
+            exit 1
+          fi
+          printf '%s\n' "$CHANGESET" > ".changeset/release-start-${GITHUB_RUN_ID}.md"
 
       - name: Compute version
         id: version
