@@ -1,10 +1,19 @@
 # Reusable Release — Finalize. Called by the consumer on release-PR merge. This is the ONLY place a
 # release tag + GitHub Release is created.
 #
-# The caller chooses the tag-target policy via 'sha':
-#   sha: ${{ github.event.pull_request.head.sha }}          # tag the staging-TESTED commit (recommended)
-#   sha: ${{ github.event.pull_request.merge_commit_sha }}  # tag the merge commit (linear-history repos)
-# and passes the PR body for the Slack thread marker:
+# The caller chooses the tag target via 'sha', and the choice follows what the base branch is:
+#   sha: ${{ github.event.pull_request.head.sha }}
+#     the commit the checks ran on — for a base branch that keeps moving while the release PR is
+#     open (feature merges into main): the merge commit would also carry everything that landed in
+#     the meantime, built and tested by nobody under this version (aragon/app);
+#   sha: ${{ github.event.pull_request.merge_commit_sha }}
+#     for a base branch that is a release line and receives nothing but release and hotfix merges
+#     (aragon/app-backend: main, with the back-merge into development and the hotfix port into an
+#     open release) — the merge commit is the base branch itself, and the tag names what runs.
+# A guard refuses any other 'sha' on a pull_request event, and a head that is not reachable from
+# the base branch (the release PR was squashed): release PRs are merged with a merge commit.
+# Non-PR callers (a hotfix flow that tags the commit it built) pass the sha they tested. The PR
+# body carries the Slack thread marker:
 #   pr-body: ${{ github.event.pull_request.body }}
 #
 # SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
@@ -15,7 +24,7 @@ on:
   workflow_call:
     inputs:
       sha:
-        description: "The commit to tag and to read version/changelog from (see header for the policy choice)"
+        description: "The commit to tag and to read version/changelog from: on a release-PR merge the PR head or the merge commit (see header for which)"
         required: true
         type: string
       pr-body:
@@ -127,6 +136,27 @@ jobs:
           ref: ${{ inputs.sha }}
           fetch-depth: "0"
           install: "false"
+
+      # On a release-PR merge the tag goes on the PR head or on the merge commit (see the header),
+      # and it must be reachable from the base branch (a squashed release PR leaves the head outside
+      # the released history). Both failures are caller mistakes, caught here before anything is tagged.
+      - name: Guard — tag the PR head or its merge commit
+        if: github.event_name == 'pull_request'
+        env:
+          SHA: ${{ inputs.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$SHA" != "$HEAD_SHA" ] && [ "$SHA" != "$MERGE_SHA" ]; then
+            echo "::error::Refusing to tag $SHA: on a release-PR merge the tag goes on the PR head ($HEAD_SHA) or on its merge commit ($MERGE_SHA)" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$SHA" "origin/$BASE_REF"; then
+            echo "::error::$SHA is not reachable from $BASE_REF: merge release PRs with a merge commit (never squash) so the tagged commit stays in the released history" >&2
+            exit 1
+          fi
 
       # The checkout above is at 'sha', so the guard reads the changesets AND the scope policy
       # exactly as they were in the tested/merged tree — a mid-release scopes-file change on the
