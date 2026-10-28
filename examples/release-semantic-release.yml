@@ -96,7 +96,8 @@ jobs:
           || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
     uses: aragon/github-templates/.github/workflows/release-finalize.yml@main
     with:
-      # Backend policy: tag the merge commit (linear history via back-merge).
+      # Backend policy: tag the merge commit. main is a release line (release and hotfix merges
+      # only, back-merged into development), so the merge commit is main itself.
       sha: ${{ github.event.pull_request.merge_commit_sha }}
       pr-body: ${{ github.event.pull_request.body }}
       after-release-note: "Production deploy will start automatically and wait for its approval."

@@ -48,8 +48,9 @@ jobs:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
   # On merge of a release/* PR into main: tag + GitHub Release (the only tagging point).
-  # `sha: head.sha` tags the staging-TESTED commit (recommended); use merge_commit_sha instead
-  # when the repo squash-merges and the head commit never lands on main.
+  # `sha: head.sha` tags the staging-TESTED commit: main keeps moving while the PR is open, so the
+  # merge commit would carry untested changes. Finalize refuses a head not reachable from main:
+  # merge release PRs with a merge commit.
   finalize:
     if: >
       github.event_name == 'pull_request'
