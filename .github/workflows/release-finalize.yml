@@ -239,7 +239,7 @@ jobs:
         uses: aragon/github-templates/steps/gh-ensure-release@main
         with:
           tag: ${{ steps.resolve.outputs.tag }}
-          title: "Release ${{ steps.resolve.outputs.tag }}"
+          title: ${{ steps.resolve.outputs.tag }}
           notes-path: ${{ steps.notes.outputs.path }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
 
