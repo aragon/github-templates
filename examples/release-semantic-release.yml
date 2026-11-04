@@ -27,7 +27,7 @@ permissions:
 jobs:
   start:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    uses: aragon/github-templates/.github/workflows/release-start.yml@main
+    uses: aragon/github-templates/.github/workflows/release-start.yml@v1
     with:
       engine: semantic-release
       base-ref: ${{ github.ref_name }}
@@ -52,7 +52,7 @@ jobs:
       && github.event.action != 'closed'
       && (startsWith(github.event.pull_request.head.ref, 'release/')
           || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
-    uses: aragon/github-templates/.github/workflows/release-pr-refresh.yml@main
+    uses: aragon/github-templates/.github/workflows/release-pr-refresh.yml@v1
     with:
       op-release-token-path: op://kv_backend2_infra/ARABOT_APP_BACKEND_RELEASES/credential
       op-linear-token-path: op://kv_backend2_infra/LINEAR_API_TOKEN/credential
@@ -67,7 +67,7 @@ jobs:
       && github.event.action != 'closed'
       && (startsWith(github.event.pull_request.head.ref, 'release/')
           || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
-    uses: aragon/github-templates/.github/workflows/deploy-docker.yml@main
+    uses: aragon/github-templates/.github/workflows/deploy-docker.yml@v1
     with:
       env: staging
       ref: ${{ github.event.pull_request.head.sha }}
@@ -94,7 +94,7 @@ jobs:
       && github.event.pull_request.merged == true
       && (startsWith(github.event.pull_request.head.ref, 'release/')
           || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
-    uses: aragon/github-templates/.github/workflows/release-finalize.yml@main
+    uses: aragon/github-templates/.github/workflows/release-finalize.yml@v1
     with:
       # Backend policy: tag the merge commit. main is a release line (release and hotfix merges
       # only, back-merged into development), so the merge commit is main itself.
@@ -116,7 +116,7 @@ jobs:
       && github.event.pull_request.merged == false
       && (startsWith(github.event.pull_request.head.ref, 'release/')
           || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
-    uses: aragon/github-templates/.github/workflows/release-pr-cancel.yml@main
+    uses: aragon/github-templates/.github/workflows/release-pr-cancel.yml@v1
     with:
       cancel-waiting-runs-of: release.yml
       op-release-token-path: op://kv_backend2_infra/ARABOT_APP_BACKEND_RELEASES/credential

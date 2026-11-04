@@ -5,9 +5,9 @@ executed from this repo.
 
 ## Referencing
 
-The consumer repos reference `@main` while the modules settle, and move to a commit SHA (with a
-`# vX.Y.Z` comment) bumped by Dependabot once they do — see the README's "Versioning". Either way,
-add the `github-actions` ecosystem to the consumer's `.github/dependabot.yml`:
+The consumer repos reference the major tag (`@v1`); a fix moves the tag and reaches every repo at
+once, a breaking change ships as `@v2` — see the README's "Versioning". Add the `github-actions`
+ecosystem to the consumer's `.github/dependabot.yml`, so the next major is proposed as a PR:
 
 ```yaml
 version: 2

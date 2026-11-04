@@ -21,7 +21,7 @@ jobs:
   # Sibling of `publish`, never in its `needs`: announces the gate without holding it.
   notify-gate:
     if: startsWith(github.event.release.tag_name, '@aragon/gov-ui-kit@')
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: gate
       env: npm
@@ -40,7 +40,7 @@ jobs:
     # The required reviewers of this environment are the approval.
     environment: npm-publish
     steps:
-      - uses: aragon/github-templates/steps/setup@main
+      - uses: aragon/github-templates/steps/setup@v1
         with:
           # Build from the tag: the approval wait is unbounded, main may have moved meanwhile.
           ref: ${{ github.event.release.tag_name }}
@@ -52,7 +52,7 @@ jobs:
   notify-result:
     needs: [notify-gate, publish]
     if: ${{ always() && startsWith(github.event.release.tag_name, '@aragon/gov-ui-kit@') }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: result
       env: npm
@@ -68,7 +68,7 @@ jobs:
 
   complete:
     needs: publish
-    uses: aragon/github-templates/.github/workflows/release-complete.yml@main
+    uses: aragon/github-templates/.github/workflows/release-complete.yml@v1
     with:
       tag: ${{ github.event.release.tag_name }}
       env: npm

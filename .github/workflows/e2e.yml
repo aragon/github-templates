@@ -10,10 +10,11 @@
 # With the op-slack-* paths set, the result is posted into the release thread (notify.yml,
 # kind: tests): pass the thread explicitly, or the PR number / release tag whose body carries it.
 #
-# SELF-REFERENCE NOTE: composite actions are referenced as `aragon/github-templates/steps/*@main`
+# SELF-REFERENCE NOTE: composite actions are referenced as `aragon/github-templates/steps/*@v1`
 # because a relative `./steps/*` inside a reusable workflow would resolve against the CALLER repo,
-# not this one. `@main` is the bootstrap default — `release-self` + Dependabot pin these to the cut
-# tag/SHA once a release is published.
+# not this one. `v1` is the moving major tag the consumers reference too (README "Versioning"):
+# a change here reaches them once `release-self` cuts the next v1.x.y; the next major rewrites
+# every self-reference to `@v2` (lib/selfReferences.test.js keeps them on one major).
 
 name: E2E
 
@@ -170,12 +171,12 @@ jobs:
       report_artifact_id: ${{ steps.upload-report.outputs.artifact-id }}
     steps:
       - name: Setup
-        uses: aragon/github-templates/steps/setup@main
+        uses: aragon/github-templates/steps/setup@v1
 
       - name: Resolve 1Password secrets
         id: op
         if: inputs.env-secret-refs != ''
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           mode: byref
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
@@ -304,7 +305,7 @@ jobs:
       - name: Parse Playwright results
         id: playwright-result
         if: always()
-        uses: aragon/github-templates/steps/parse-playwright-results@main
+        uses: aragon/github-templates/steps/parse-playwright-results@v1
         with:
           report-path: ${{ inputs.results-path != '' && inputs.results-path || format('{0}/e2e/test-results/results.json', inputs.working-directory) }}
           step-outcome: ${{ steps.tests.outcome }}
@@ -356,7 +357,7 @@ jobs:
   notify:
     needs: e2e
     if: ${{ always() && inputs.op-slack-bot-token-path != '' }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: tests
       env: ${{ inputs.environment }}

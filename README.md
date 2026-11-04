@@ -70,7 +70,7 @@ thread (or the channel) with a link to the run.
 ```yaml
 jobs:
   release:
-    uses: aragon/github-templates/.github/workflows/release-start.yml@main
+    uses: aragon/github-templates/.github/workflows/release-start.yml@v1
     with:
       engine: changesets
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
@@ -90,12 +90,20 @@ See [`examples/`](examples/) for the full lifecycle per scenario.
 
 ## Versioning
 
-Semver tags `vX.Y.Z` + a moving major `vX`, cut by `release-self.yml`.
+Semver tags `vX.Y.Z` + a moving major `vX`, cut by `release-self.yml` (manual dispatch on `main`
+with the version to cut; the major tag never moves backwards).
 
-Consumers reference `@main` while the modules settle after a migration (a fix lands once, every
-repo picks it up), and move to a **commit SHA** (with a `# vX.Y.Z` comment, bumped by Dependabot)
-once they do — the pinned state is the target, `@main` the bootstrap. The reusable workflows
-reference the composite actions and each other `@main` as well (see `docs/release-design.md` §7).
+Consumers reference the **major tag** (`@v1`), so a fix or a backward-compatible addition reaches
+every repo at once: merge it, cut `v1.x.y`, and `v1` moves. Within a major the interface is guarded by
+`lib/backcompat.test.js` (no removed inputs, no new required ones, no changed defaults — see
+`contracts/README.md`). A breaking change ships as the next major: it moves every self-reference
+below to `@v2`, is cut as `v2.0.0`, and each consumer adopts `@v2` in a PR of its own (Dependabot
+opens it). The reusable workflows reference the composite actions and each other through the same
+major tag (see `docs/release-design.md` §7), so a `v1` consumer never runs `v2` code; a test keeps
+every self-reference on one major. CodeQL flags the moving tag as `actions/unpinned-tag`; the
+alerts are dismissed with this rationale.
+
+`@main` is only the bootstrap right after a migration, while the modules settle.
 
 `credential-retrieval` gained an additive `mode: byref` (named `op://` references, JSON output) that
 every reusable workflow now uses instead of calling `1password/load-secrets-action` directly — see

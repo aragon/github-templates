@@ -177,15 +177,20 @@ resolves them centrally. No vault layout is hardcoded in the modules.
 
 - `github-templates` cuts **semver tags `vX.Y.Z`** plus a **moving major `vX`**, produced by its own
   release workflow (`release-self.yml`) — the repo dogfoods the very modules it ships.
-- **Consumers pin to a full commit SHA** (with a `# vX.Y.Z` comment) and rely on **Dependabot**
-  (`github-actions` ecosystem) to auto-open bump PRs. This keeps the supply chain pinned while still
-  propagating security patches quickly — merge the Dependabot PR and the fix lands. Right after a
-  migration the consumers reference `@main` instead, so a fix lands once for every repo while the
-  modules settle; the pin is a follow-up once they do.
-- This module drop is **additive** to `steps/credential-retrieval`: the existing `alltoenv` / `alltofile`
-  bulk-load behavior is unchanged, so `@v0.4` SHA pins in app / app-backend / gov-ui-kit keep working.
-  What's new is `mode: byref` (§4), consumed only by the reusable workflows in this same PR. New tag:
-  **`v0.5`**, with `v1` introduced once the modules stabilise.
+- **Consumers reference the moving major** (`@v1`), not a commit SHA: DevOps wants a template fix to
+  keep reaching every repo at once, which per-repo SHA pins bumped by Dependabot give up. A fix or a
+  backward-compatible addition is cut as `v1.x.y` and moves `v1`; `lib/backcompat.test.js` guards the
+  interface within the major (no removed inputs, no new required ones, no changed defaults). A breaking
+  change ships as `v2`, which each consumer adopts in its own PR — the consumers keep the
+  `github-actions` Dependabot ecosystem so that PR is opened for them. Right after a migration a
+  consumer references `@main` instead, so a fix lands once for every repo while the modules settle.
+- The reusable workflows reference the composite actions and each other through the same major tag
+  (§7), so a `v1` consumer never runs `v2` code. `release-self.yml` refuses to move a major tag
+  backwards, and a unit test refuses a self-reference on another major.
+- CodeQL flags the moving tag as `actions/unpinned-tag` in every consumer, as it flags `@main`; the
+  alerts are dismissed with the rationale above.
+- The `v0.x` line (`steps/credential-retrieval` `alltoenv` / `alltofile`) stays as it is for consumers
+  still pinned to its SHAs; everything since is additive.
 
 ---
 
@@ -193,7 +198,8 @@ resolves them centrally. No vault layout is hardcoded in the modules.
 
 Inside a **reusable workflow**, a relative `uses: ./steps/foo` resolves against the **caller** repo, not
 against `github-templates`. Therefore every composite-action reference made from one of our reusable
-workflows is **fully qualified**: `aragon/github-templates/steps/foo@<sha>`. Composite actions, by
+workflows is **fully qualified**: `aragon/github-templates/steps/foo@v1`, on the same major tag the
+consumers reference (§6). Composite actions, by
 contrast, can reference their own co-located files via `$GITHUB_ACTION_PATH` — which is why each action
 that needs a script (`slack-notify`, `read-changelog`, `generate-release-summary`) **ships that script
 inside its own folder** rather than expecting it in the consumer repo. This is the main fidelity fix
@@ -260,7 +266,7 @@ either the lookup warns and the message is posted top-level.
 - `examples/` — thin caller workflows per scenario (A/B/C) as copy-paste references for migration.
   (Not `workflow-templates/`: that only auto-surfaces from an org's `.github` repo, which this is not.)
 - `.github/workflows/_selftest.yml` — manual smoke test exercising the leaf actions.
-- `.github/dependabot.yml` — `github-actions` ecosystem for self; documents the consumer pin+bump flow.
+- `.github/dependabot.yml` — `github-actions` ecosystem for self; documents what the consumers' block is for.
 
 ---
 
@@ -309,7 +315,7 @@ of the hour.
 
 Per consumer repo, **bottom-up strangler**, pilot `app` first:
 1. Replace leaf actions (`setup`, `slack-notify`, `extract-slack-ts`, changelog/summary helpers) with
-   `aragon/github-templates/steps/*@<sha>`. Lowest risk, immediate de-duplication. Old workflows still run.
+   `aragon/github-templates/steps/*@v1`. Lowest risk, immediate de-duplication. Old workflows still run.
 2. Switch deploy/e2e jobs to call `deploy-vercel.yml` / `deploy-docker.yml` / `e2e.yml`.
 3. Switch the release orchestration to `release-start.yml` + `release-finalize.yml` (highest risk — last).
 4. Delete the now-dead per-repo copies once the new path is green.

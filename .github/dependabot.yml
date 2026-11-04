@@ -14,6 +14,6 @@ updates:
         patterns:
           - "*"
 
-# Consumer repos should add the same `github-actions` ecosystem block so Dependabot tracks their
-# `aragon/github-templates/...@<sha>` pins and auto-opens PRs to adopt new releases. That is how a
-# security patch here propagates quickly while every consumer stays SHA-pinned.
+# Consumer repos carry the same `github-actions` ecosystem block: they reference the moving major
+# tag (`aragon/github-templates/...@v1`), which a fix moves for every repo at once, and Dependabot
+# opens the PR that adopts the next major (`@v2`) when one ships — see README "Versioning".
