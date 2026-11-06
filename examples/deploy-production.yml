@@ -30,7 +30,7 @@ permissions:
 jobs:
   deploy:
     if: ${{ github.event_name != 'release' || startsWith(github.event.release.tag_name, '@aragon/app@') }}
-    uses: aragon/github-templates/.github/workflows/deploy-vercel.yml@main
+    uses: aragon/github-templates/.github/workflows/deploy-vercel.yml@v1
     with:
       env: production
       ref: ${{ github.event.release.tag_name || inputs.tag }}
@@ -52,7 +52,7 @@ jobs:
 
   smoke:
     needs: deploy
-    uses: aragon/github-templates/.github/workflows/e2e.yml@main
+    uses: aragon/github-templates/.github/workflows/e2e.yml@v1
     with:
       deployment-url: https://app.aragon.org
       environment: production
@@ -68,7 +68,7 @@ jobs:
   complete:
     needs: deploy
     if: github.event_name == 'release'
-    uses: aragon/github-templates/.github/workflows/release-complete.yml@main
+    uses: aragon/github-templates/.github/workflows/release-complete.yml@v1
     with:
       tag: ${{ github.event.release.tag_name }}
       env: production

@@ -12,7 +12,7 @@
 # messages thread under the release conversation found through `slack-thread-*`, or open a new
 # thread whose ts is returned as `slack-ts`.
 #
-# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@v1` — see e2e.yml header.
 
 name: Deploy (Docker over SSH)
 
@@ -144,7 +144,7 @@ concurrency:
 jobs:
   notify-start:
     if: inputs.op-slack-bot-token-path != ''
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: start
       env: ${{ inputs.env }}
@@ -163,7 +163,7 @@ jobs:
   notify-gate:
     needs: notify-start
     if: ${{ inputs.op-slack-bot-token-path != '' && inputs.gated }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: gate
       env: ${{ inputs.env }}
@@ -184,7 +184,7 @@ jobs:
       # also installs the `op` CLI, which prepare-command may use with the same token.
       - name: Resolve SSH credentials
         id: op
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           mode: byref
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
@@ -211,7 +211,7 @@ jobs:
       # Written before the rsync so the file travels to the server with the code.
       - name: Materialize env file from vault
         if: inputs.op-env-vault != ''
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           mode: alltofile
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
@@ -258,7 +258,7 @@ jobs:
   notify-result:
     needs: [notify-start, deploy]
     if: ${{ always() && inputs.op-slack-bot-token-path != '' }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: result
       env: ${{ inputs.env }}

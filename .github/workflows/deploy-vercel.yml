@@ -14,7 +14,7 @@
 # The messages thread under the release conversation found through `slack-thread-*`, or open a
 # new thread whose ts is returned as `slack-ts`.
 #
-# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@v1` — see e2e.yml header.
 
 name: Deploy (Vercel)
 
@@ -206,7 +206,7 @@ permissions:
 jobs:
   notify-start:
     if: inputs.op-slack-bot-token-path != ''
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: start
       env: ${{ inputs.env }}
@@ -225,7 +225,7 @@ jobs:
   notify-gate:
     needs: notify-start
     if: ${{ inputs.op-slack-bot-token-path != '' && inputs.gated }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: gate
       env: ${{ inputs.env }}
@@ -255,7 +255,7 @@ jobs:
       # separate and optional — see op-submodules-token-path.
       - name: Resolve Vercel credentials
         id: op
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           mode: byref
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
@@ -294,7 +294,7 @@ jobs:
       - name: Resolve build secrets
         id: build-secrets
         if: inputs.op-build-secret-refs != ''
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           mode: byref
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
@@ -317,7 +317,7 @@ jobs:
           done < <(jq -r 'keys[]' <<< "$SECRETS_JSON")
 
       - name: Setup
-        uses: aragon/github-templates/steps/setup@main
+        uses: aragon/github-templates/steps/setup@v1
         with:
           ref: ${{ inputs.ref }}
           submodules: ${{ inputs.submodules }}
@@ -332,7 +332,7 @@ jobs:
 
       - name: Load environment secrets into .env
         if: inputs.op-env-vault != ''
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           op-vault: ${{ inputs.op-env-vault }}
@@ -533,7 +533,7 @@ jobs:
   notify-result:
     needs: [notify-start, deploy, verify-output]
     if: ${{ always() && inputs.op-slack-bot-token-path != '' }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: result
       env: ${{ inputs.env }}

@@ -1,5 +1,5 @@
 {
-    "description": "Known consumer call shapes, checked by lib/backcompat.test.js: every input/secret listed here must stay defined on the called workflow, and every required input/secret of the called workflow must be listed here. Add an entry when a consumer repo starts calling a reusable workflow @main; keep the lists in sync with the consumer's `with:`/`secrets:` blocks.",
+    "description": "Known consumer call shapes, checked by lib/backcompat.test.js: every input/secret listed here must stay defined on the called workflow, and every required input/secret of the called workflow must be listed here. Add an entry when a consumer repo starts calling a reusable workflow; keep the lists in sync with the consumer's `with:`/`secrets:` blocks.",
     "consumers": [
         {
             "repo": "aragon/protocol-doc-ui",

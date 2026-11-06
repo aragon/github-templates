@@ -1,6 +1,6 @@
 # github-templates releases itself: cut an immutable semver tag (vX.Y.Z) and move the floating
-# major tag (vX) to it. Consumers pin to a SHA + Dependabot; the major tag gives a human-readable
-# line and lets early adopters track vX.
+# major tag (vX) to it. The consumers reference the major tag, so moving it is what ships a change
+# to every repo; a major tag never moves backwards (the new cut must descend from where it is).
 #
 # This is a normal in-repo workflow (not workflow_call), so it can dogfood the repo's own
 # composite action via a relative path after checkout.
@@ -54,9 +54,15 @@ jobs:
       - name: Move floating major tag
         env:
           MAJOR: ${{ steps.v.outputs.major }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          git tag -f "$MAJOR" "${{ github.sha }}"
+          if git rev-parse -q --verify "refs/tags/$MAJOR" >/dev/null \
+            && ! git merge-base --is-ancestor "$MAJOR" "$SHA"; then
+            echo "::error::$MAJOR points to $(git rev-list -n 1 "$MAJOR"), which is not an ancestor of $SHA — a major tag never moves backwards" >&2
+            exit 1
+          fi
+          git tag -f "$MAJOR" "$SHA"
           git push -f origin "$MAJOR"
 
       - name: Create GitHub Release

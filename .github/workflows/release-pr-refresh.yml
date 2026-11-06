@@ -20,7 +20,7 @@
 # package.json files, which only exist before the release commit — after it, a refresh
 # would always yield "No packages bumped." and stomp the body.
 #
-# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@v1` — see e2e.yml header.
 
 name: Release — PR Refresh
 
@@ -100,7 +100,7 @@ jobs:
     steps:
       - name: Resolve 1Password secrets
         id: op
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           mode: byref
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
@@ -113,7 +113,7 @@ jobs:
 
       # Full history: the summary range starts at the latest release tag.
       - name: Setup
-        uses: aragon/github-templates/steps/setup@main
+        uses: aragon/github-templates/steps/setup@v1
         with:
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -122,7 +122,7 @@ jobs:
 
       - name: Generate release summary
         id: summary
-        uses: aragon/github-templates/steps/generate-release-summary@main
+        uses: aragon/github-templates/steps/generate-release-summary@v1
         with:
           linear-api-token: ${{ fromJSON(steps.op.outputs.secrets).LINEAR_API_TOKEN }}
           tag-glob: ${{ inputs.tag-prefix }}[0-9]*
@@ -131,7 +131,7 @@ jobs:
 
       - name: Read PR body
         id: pr-body
-        uses: aragon/github-templates/steps/gh-pr-get-body@main
+        uses: aragon/github-templates/steps/gh-pr-get-body@v1
         with:
           pr-number: ${{ github.event.pull_request.number }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
@@ -140,7 +140,7 @@ jobs:
       # downstream flows (finalize, cancel) survives the body rewrite.
       - name: Extract Slack thread marker
         id: slack-ts
-        uses: aragon/github-templates/steps/extract-slack-ts@main
+        uses: aragon/github-templates/steps/extract-slack-ts@v1
         with:
           body: ${{ steps.pr-body.outputs.body }}
 
@@ -172,7 +172,7 @@ jobs:
           fi
 
       - name: Update PR body
-        uses: aragon/github-templates/steps/gh-pr-edit-body@main
+        uses: aragon/github-templates/steps/gh-pr-edit-body@v1
         with:
           pr-number: ${{ github.event.pull_request.number }}
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
@@ -188,7 +188,7 @@ jobs:
       - name: Update Slack head message
         if: ${{ inputs.op-slack-bot-token-path != '' && steps.markers.outputs.ts != '' }}
         continue-on-error: true
-        uses: aragon/github-templates/steps/slack-notify@main
+        uses: aragon/github-templates/steps/slack-notify@v1
         with:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
@@ -206,7 +206,7 @@ jobs:
   notify-failure:
     needs: refresh
     if: ${{ failure() && inputs.op-slack-bot-token-path != '' }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: failure
       subject: "Release PR refresh"

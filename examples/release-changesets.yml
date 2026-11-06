@@ -18,7 +18,7 @@ permissions:
 jobs:
   start:
     if: github.event_name == 'workflow_dispatch'
-    uses: aragon/github-templates/.github/workflows/release-start.yml@main
+    uses: aragon/github-templates/.github/workflows/release-start.yml@v1
     with:
       engine: changesets
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
@@ -38,7 +38,7 @@ jobs:
       github.event_name == 'pull_request'
       && github.event.action != 'closed'
       && startsWith(github.event.pull_request.head.ref, 'release/')
-    uses: aragon/github-templates/.github/workflows/release-pr-refresh.yml@main
+    uses: aragon/github-templates/.github/workflows/release-pr-refresh.yml@v1
     with:
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
       op-linear-token-path: op://kv_app_infra/LINEAR_API_TOKEN/credential
@@ -56,7 +56,7 @@ jobs:
       github.event_name == 'pull_request'
       && github.event.pull_request.merged == true
       && startsWith(github.event.pull_request.head.ref, 'release/')
-    uses: aragon/github-templates/.github/workflows/release-finalize.yml@main
+    uses: aragon/github-templates/.github/workflows/release-finalize.yml@v1
     with:
       sha: ${{ github.event.pull_request.head.sha }}
       pr-body: ${{ github.event.pull_request.body }}
@@ -73,7 +73,7 @@ jobs:
       && github.event.action == 'closed'
       && github.event.pull_request.merged == false
       && startsWith(github.event.pull_request.head.ref, 'release/')
-    uses: aragon/github-templates/.github/workflows/release-pr-cancel.yml@main
+    uses: aragon/github-templates/.github/workflows/release-pr-cancel.yml@v1
     with:
       op-release-token-path: op://kv_app_infra/ARABOT_PAT/credential
       op-slack-bot-token-path: op://kv_app_infra/SLACK_BOT_TOKEN/credential

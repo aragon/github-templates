@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: aragon/github-templates/.github/workflows/deploy-docker.yml@main
+    uses: aragon/github-templates/.github/workflows/deploy-docker.yml@v1
     with:
       env: ${{ inputs.env }}
       remote-path: ~/app-backend-deploy

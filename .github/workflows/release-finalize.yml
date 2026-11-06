@@ -16,7 +16,7 @@
 # body carries the Slack thread marker:
 #   pr-body: ${{ github.event.pull_request.body }}
 #
-# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@main` — see e2e.yml header.
+# SELF-REFERENCE NOTE: `aragon/github-templates/steps/*@v1` — see e2e.yml header.
 
 name: Release — Finalize
 
@@ -120,7 +120,7 @@ jobs:
       # Every op-*-path input is resolved here, in one place — see steps/credential-retrieval.
       - name: Resolve 1Password secrets
         id: op
-        uses: aragon/github-templates/steps/credential-retrieval@main
+        uses: aragon/github-templates/steps/credential-retrieval@v1
         with:
           mode: byref
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
@@ -130,7 +130,7 @@ jobs:
             SLACK_CHANNEL_ID=${{ inputs.op-slack-channel-id-path }}
 
       - name: Setup
-        uses: aragon/github-templates/steps/setup@main
+        uses: aragon/github-templates/steps/setup@v1
         with:
           token: ${{ fromJSON(steps.op.outputs.secrets).RELEASE_TOKEN }}
           ref: ${{ inputs.sha }}
@@ -163,7 +163,7 @@ jobs:
       # target branch cannot reclassify leftover changesets.
       - name: Guard — no pending changesets
         if: inputs.changesets-guard != ''
-        uses: aragon/github-templates/steps/changesets-guard@main
+        uses: aragon/github-templates/steps/changesets-guard@v1
         with:
           scope: ${{ inputs.changesets-guard != 'all' && inputs.changesets-guard || '' }}
           scopes-file: ${{ inputs.scopes-file }}
@@ -199,13 +199,13 @@ jobs:
 
       - name: Extract Slack thread ts
         id: slack-ts
-        uses: aragon/github-templates/steps/extract-slack-ts@main
+        uses: aragon/github-templates/steps/extract-slack-ts@v1
         with:
           body: ${{ inputs.pr-body }}
 
       - name: Read changelog section
         id: changelog
-        uses: aragon/github-templates/steps/read-changelog@main
+        uses: aragon/github-templates/steps/read-changelog@v1
         with:
           version: ${{ steps.resolve.outputs.version }}
           path: ${{ inputs.changelog-path != '' && inputs.changelog-path || format('{0}/CHANGELOG.md', inputs.package-dir) }}
@@ -214,7 +214,7 @@ jobs:
       # the release event can keep threading into the same Slack conversation.
       - name: Build release notes
         id: notes
-        uses: aragon/github-templates/steps/build-release-notes@main
+        uses: aragon/github-templates/steps/build-release-notes@v1
         with:
           changes: ${{ steps.changelog.outputs.changes }}
           slack-ts: ${{ steps.slack-ts.outputs.ts }}
@@ -222,7 +222,7 @@ jobs:
       - name: Notify Slack — tagging
         if: ${{ inputs.op-slack-bot-token-path != '' && steps.slack-ts.outputs.ts != '' }}
         continue-on-error: true
-        uses: aragon/github-templates/steps/slack-notify@main
+        uses: aragon/github-templates/steps/slack-notify@v1
         with:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
@@ -230,13 +230,13 @@ jobs:
           message: "🏷️ *PR merged! Creating tag and GitHub Release...*"
 
       - name: Ensure tag
-        uses: aragon/github-templates/steps/gh-ensure-tag@main
+        uses: aragon/github-templates/steps/gh-ensure-tag@v1
         with:
           tag: ${{ steps.resolve.outputs.tag }}
           sha: ${{ inputs.sha }}
 
       - name: Ensure GitHub Release
-        uses: aragon/github-templates/steps/gh-ensure-release@main
+        uses: aragon/github-templates/steps/gh-ensure-release@v1
         with:
           tag: ${{ steps.resolve.outputs.tag }}
           title: ${{ steps.resolve.outputs.tag }}
@@ -248,7 +248,7 @@ jobs:
       - name: Notify Slack — released
         if: inputs.op-slack-bot-token-path != ''
         continue-on-error: true
-        uses: aragon/github-templates/steps/slack-notify@main
+        uses: aragon/github-templates/steps/slack-notify@v1
         with:
           slack-bot-token: ${{ fromJSON(steps.op.outputs.secrets).SLACK_BOT_TOKEN }}
           slack-channel-id: ${{ fromJSON(steps.op.outputs.secrets).SLACK_CHANNEL_ID }}
@@ -260,7 +260,7 @@ jobs:
   notify-failure:
     needs: finalize
     if: ${{ failure() && inputs.op-slack-bot-token-path != '' }}
-    uses: aragon/github-templates/.github/workflows/notify.yml@main
+    uses: aragon/github-templates/.github/workflows/notify.yml@v1
     with:
       kind: failure
       subject: "Release finalize (tag + GitHub Release)"
