@@ -47,6 +47,50 @@ downloads, an inline npm publish). Nothing that a single repo needs belongs here
 | `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / write |
 | `workflow-guards` | fail on a job GitHub skips by surprise: no status function in its `if`, after a job that runs on a `!cancelled()` guard past a skipped ancestor |
 
+### Pass-through actions (`steps/`)
+
+The basic third-party actions every CI uses, pinned once here so a consumer never pins them
+itself. Each one has **the same inputs, outputs and defaults as its upstream**, so adopting it is
+a one-line change:
+
+```yaml
+- uses: actions/checkout@v4                                  # before
+- uses: aragon/github-templates/steps/checkout@v1            # after — same `with:`, same outputs
+```
+
+| Action | Wraps |
+|--------|-------|
+| `checkout` | `actions/checkout` |
+| `setup-node` | `actions/setup-node` |
+| `setup-pnpm` | `pnpm/action-setup` |
+| `setup-bun` | `oven-sh/setup-bun` (without the deprecated `registry-url` / `scope`) |
+| `setup-foundry` | `foundry-rs/foundry-toolchain` |
+| `setup-python` | `actions/setup-python` |
+| `cache` | `actions/cache` (without the deprecated `save-always`) |
+| `upload-artifact` | `actions/upload-artifact` |
+| `download-artifact` | `actions/download-artifact` |
+
+How they stay current: Dependabot bumps the pin inside `steps/<name>/action.yml`; CI
+(`npm run passthrough:check`) compares the wrapper with the upstream `action.yml` at the new pin and
+fails if upstream added, removed or changed an input or output — then `npm run passthrough:sync`
+re-copies it (and `npm run contracts:update` registers what grew). Once merged, cutting a release
+moves `v1` and every consumer runs the new version. A default changed or an input removed upstream
+is a breaking change for the contracts (`lib/backcompat.test.js`) like any other.
+
+These files are **generated** by `lib/passthrough.js` from the upstream `action.yml` — never edit
+them by hand. Inputs that upstream marks with a `deprecationMessage` are left out (the wrapper
+passes every input it declares, so they would warn on every run). To add one, create
+`steps/<name>/action.yml` with the marker line and the pin, then run `npm run passthrough:sync`:
+
+```yaml
+# Pass-through of docker/login-action
+runs:
+  using: "composite"
+  steps:
+    - id: upstream
+      uses: docker/login-action@<full sha> # vX.Y.Z
+```
+
 ### Reusable workflows (`.github/workflows/`)
 
 | Workflow | Purpose |
@@ -117,6 +161,8 @@ every reusable workflow now uses instead of calling `1password/load-secrets-acti
   the scripts must stay dependency-free to run on a bare runner.
 - `npm run contracts:update` registers interface additions in `contracts/interfaces.json`; the
   test suite fails on unregistered additions and on breaking changes (see `contracts/README.md`).
+- `npm run passthrough:sync` regenerates the pass-through actions from their pinned upstream;
+  `npm run passthrough:check` (CI) only reports the out-of-date ones. Both need network access.
 - Run **Self-test (steps)** (`.github/workflows/_selftest.yml`, manual dispatch) to smoke-test the
   leaf actions.
 - A job with a skipped job anywhere in its `needs` chain is skipped too, unless its `if` carries a

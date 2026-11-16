@@ -2,6 +2,8 @@ version: 2
 updates:
   # Keep the third-party actions pinned inside this repo's composite actions and reusable
   # workflows up to date. Dependabot opens bump PRs (preserving SHA pins) when new versions ship.
+  # The pass-through actions (steps/checkout, steps/setup-node, …) are covered by "/steps/*" too;
+  # CI fails a bump whose upstream changed its interface until `npm run passthrough:sync` is run.
   - package-ecosystem: "github-actions"
     # "/" covers only .github/workflows; the composite actions live in steps/*.
     directories:

@@ -894,6 +894,37 @@
                 "path"
             ]
         },
+        "cache": {
+            "inputs": {
+                "enableCrossOsArchive": {
+                    "required": false,
+                    "default": "false"
+                },
+                "fail-on-cache-miss": {
+                    "required": false,
+                    "default": "false"
+                },
+                "key": {
+                    "required": true
+                },
+                "lookup-only": {
+                    "required": false,
+                    "default": "false"
+                },
+                "path": {
+                    "required": true
+                },
+                "restore-keys": {
+                    "required": false
+                },
+                "upload-chunk-size": {
+                    "required": false
+                }
+            },
+            "outputs": [
+                "cache-hit"
+            ]
+        },
         "changesets-guard": {
             "inputs": {
                 "scope": {
@@ -906,6 +937,93 @@
                 }
             },
             "outputs": []
+        },
+        "checkout": {
+            "inputs": {
+                "allow-unsafe-pr-checkout": {
+                    "required": false,
+                    "default": "false"
+                },
+                "clean": {
+                    "required": false,
+                    "default": "true"
+                },
+                "fetch-depth": {
+                    "required": false,
+                    "default": "1"
+                },
+                "fetch-tags": {
+                    "required": false,
+                    "default": "false"
+                },
+                "filter": {
+                    "required": false,
+                    "default": "null"
+                },
+                "github-server-url": {
+                    "required": false
+                },
+                "lfs": {
+                    "required": false,
+                    "default": "false"
+                },
+                "path": {
+                    "required": false
+                },
+                "persist-credentials": {
+                    "required": false,
+                    "default": "true"
+                },
+                "ref": {
+                    "required": false
+                },
+                "repository": {
+                    "required": false,
+                    "default": "${{ github.repository }}"
+                },
+                "set-safe-directory": {
+                    "required": false,
+                    "default": "true"
+                },
+                "show-progress": {
+                    "required": false,
+                    "default": "true"
+                },
+                "sparse-checkout": {
+                    "required": false,
+                    "default": "null"
+                },
+                "sparse-checkout-cone-mode": {
+                    "required": false,
+                    "default": "true"
+                },
+                "ssh-key": {
+                    "required": false
+                },
+                "ssh-known-hosts": {
+                    "required": false
+                },
+                "ssh-strict": {
+                    "required": false,
+                    "default": "true"
+                },
+                "ssh-user": {
+                    "required": false,
+                    "default": "git"
+                },
+                "submodules": {
+                    "required": false,
+                    "default": "false"
+                },
+                "token": {
+                    "required": false,
+                    "default": "${{ github.token }}"
+                }
+            },
+            "outputs": [
+                "commit",
+                "ref"
+            ]
         },
         "compute-version": {
             "inputs": {
@@ -979,6 +1097,48 @@
             },
             "outputs": [
                 "secrets"
+            ]
+        },
+        "download-artifact": {
+            "inputs": {
+                "artifact-ids": {
+                    "required": false
+                },
+                "digest-mismatch": {
+                    "required": false,
+                    "default": "error"
+                },
+                "github-token": {
+                    "required": false
+                },
+                "merge-multiple": {
+                    "required": false,
+                    "default": "false"
+                },
+                "name": {
+                    "required": false
+                },
+                "path": {
+                    "required": false
+                },
+                "pattern": {
+                    "required": false
+                },
+                "repository": {
+                    "required": false,
+                    "default": "${{ github.repository }}"
+                },
+                "run-id": {
+                    "required": false,
+                    "default": "${{ github.run_id }}"
+                },
+                "skip-decompress": {
+                    "required": false,
+                    "default": "false"
+                }
+            },
+            "outputs": [
+                "download-path"
             ]
         },
         "extract-slack-ts": {
@@ -1307,6 +1467,201 @@
             },
             "outputs": []
         },
+        "setup-bun": {
+            "inputs": {
+                "bun-download-url": {
+                    "required": false
+                },
+                "bun-version": {
+                    "required": false
+                },
+                "bun-version-file": {
+                    "required": false,
+                    "default": "null"
+                },
+                "no-cache": {
+                    "required": false,
+                    "default": "false"
+                },
+                "registries": {
+                    "required": false
+                },
+                "token": {
+                    "required": false,
+                    "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}"
+                }
+            },
+            "outputs": [
+                "bun-download-url",
+                "bun-path",
+                "bun-revision",
+                "bun-version",
+                "cache-hit"
+            ]
+        },
+        "setup-foundry": {
+            "inputs": {
+                "cache": {
+                    "required": false,
+                    "default": "true"
+                },
+                "cache-key": {
+                    "required": false,
+                    "default": "${{ github.job }}-${{ github.sha }}"
+                },
+                "cache-restore-keys": {
+                    "required": false,
+                    "default": "|-"
+                },
+                "network": {
+                    "required": false,
+                    "default": "ethereum"
+                },
+                "version": {
+                    "required": false,
+                    "default": "stable"
+                }
+            },
+            "outputs": []
+        },
+        "setup-node": {
+            "inputs": {
+                "architecture": {
+                    "required": false
+                },
+                "cache": {
+                    "required": false
+                },
+                "cache-dependency-path": {
+                    "required": false
+                },
+                "check-latest": {
+                    "required": false,
+                    "default": "false"
+                },
+                "mirror": {
+                    "required": false
+                },
+                "mirror-token": {
+                    "required": false
+                },
+                "node-version": {
+                    "required": false
+                },
+                "node-version-file": {
+                    "required": false
+                },
+                "package-manager-cache": {
+                    "required": false,
+                    "default": "true"
+                },
+                "registry-url": {
+                    "required": false
+                },
+                "scope": {
+                    "required": false
+                },
+                "token": {
+                    "required": false,
+                    "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}"
+                }
+            },
+            "outputs": [
+                "cache-hit",
+                "cache-matched-key",
+                "cache-primary-key",
+                "node-version"
+            ]
+        },
+        "setup-pnpm": {
+            "inputs": {
+                "cache": {
+                    "required": false,
+                    "default": "false"
+                },
+                "cache_dependency_path": {
+                    "required": false,
+                    "default": "pnpm-lock.yaml"
+                },
+                "dest": {
+                    "required": false,
+                    "default": "~/setup-pnpm"
+                },
+                "package_json_file": {
+                    "required": false,
+                    "default": "package.json"
+                },
+                "run_install": {
+                    "required": false,
+                    "default": "null"
+                },
+                "standalone": {
+                    "required": false,
+                    "default": "false"
+                },
+                "version": {
+                    "required": false
+                }
+            },
+            "outputs": [
+                "bin_dest",
+                "dest"
+            ]
+        },
+        "setup-python": {
+            "inputs": {
+                "allow-prereleases": {
+                    "required": false,
+                    "default": "false"
+                },
+                "architecture": {
+                    "required": false
+                },
+                "cache": {
+                    "required": false
+                },
+                "cache-dependency-path": {
+                    "required": false
+                },
+                "check-latest": {
+                    "required": false,
+                    "default": "false"
+                },
+                "freethreaded": {
+                    "required": false,
+                    "default": "false"
+                },
+                "mirror": {
+                    "required": false,
+                    "default": "https://raw.githubusercontent.com/actions/python-versions/main"
+                },
+                "mirror-token": {
+                    "required": false
+                },
+                "pip-version": {
+                    "required": false
+                },
+                "python-version": {
+                    "required": false
+                },
+                "python-version-file": {
+                    "required": false
+                },
+                "token": {
+                    "required": false,
+                    "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}"
+                },
+                "update-environment": {
+                    "required": false,
+                    "default": "true"
+                }
+            },
+            "outputs": [
+                "cache-hit",
+                "python-path",
+                "python-version"
+            ]
+        },
         "slack-notify": {
             "inputs": {
                 "cut-link": {
@@ -1333,6 +1688,45 @@
             },
             "outputs": [
                 "ts"
+            ]
+        },
+        "upload-artifact": {
+            "inputs": {
+                "archive": {
+                    "required": false,
+                    "default": "true"
+                },
+                "compression-level": {
+                    "required": false,
+                    "default": "6"
+                },
+                "if-no-files-found": {
+                    "required": false,
+                    "default": "warn"
+                },
+                "include-hidden-files": {
+                    "required": false,
+                    "default": "false"
+                },
+                "name": {
+                    "required": false,
+                    "default": "artifact"
+                },
+                "overwrite": {
+                    "required": false,
+                    "default": "false"
+                },
+                "path": {
+                    "required": true
+                },
+                "retention-days": {
+                    "required": false
+                }
+            },
+            "outputs": [
+                "artifact-digest",
+                "artifact-id",
+                "artifact-url"
             ]
         },
         "workflow-guards": {

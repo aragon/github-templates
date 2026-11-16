@@ -4,6 +4,8 @@
     "description": "Shared composite actions and reusable workflows. No runtime dependencies on purpose: action scripts must run on a bare runner.",
     "scripts": {
         "test": "node --test 'lib/*.test.js' 'steps/**/*.test.js'",
-        "contracts:update": "node lib/updateContracts.js"
+        "contracts:update": "node lib/updateContracts.js",
+        "passthrough:sync": "node lib/passthrough.js",
+        "passthrough:check": "node lib/passthrough.js --check"
     }
 }
