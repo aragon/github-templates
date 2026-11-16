@@ -14,6 +14,9 @@ jobs:
   steps:
     runs-on: ubuntu-latest
     steps:
+      # A local ./steps action needs the repo on disk before it can be loaded.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Setup (install disabled — the root package has no dependencies or lockfile)
         uses: ./steps/setup
         with:
@@ -397,7 +400,8 @@ jobs:
           DOWNLOAD_PATH: ${{ steps.download.outputs.download-path }}
         run: |
           set -euo pipefail
-          [ "$CACHE_HIT" = "false" ] || { echo "::error::expected a cache miss, got '$CACHE_HIT'"; exit 1; }
+          # actions/cache leaves cache-hit empty on a miss ('true'/'false' only when something restored).
+          [ -z "$CACHE_HIT" ] || { echo "::error::expected a cache miss, got '$CACHE_HIT'"; exit 1; }
           [ -n "$ARTIFACT_ID" ] || { echo "::error::upload-artifact gave no artifact-id"; exit 1; }
           cmp passthrough-fixture/content.txt "$DOWNLOAD_PATH/content.txt" \
             || { echo "::error::the downloaded artifact differs from the upload"; exit 1; }
