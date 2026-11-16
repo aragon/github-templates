@@ -228,6 +228,7 @@ versus the per-repo originals, which assumed the script lived in the same checko
 | `gh-ensure-release` | idempotent GitHub Release | `tag`, `title`, `notes-path`, `token` |
 | `git-ensure-branch` | idempotent branch from base | `branch`, `base-ref`, `remote` → `created` |
 | `gh-pr-get-body` / `gh-pr-edit-body` | heredoc-safe PR body read / body-file write | `pr-number`, `token` (+`body`) → `body` |
+| `checkout`, `setup-node`, `setup-pnpm`, `setup-bun`, `setup-foundry`, `setup-python`, `cache`, `upload-artifact`, `download-artifact` | pass-throughs of the basic third-party actions, pinned once here and carried to every consumer by the major tag; generated from the upstream `action.yml` by `lib/passthrough.js` and checked against it in CI (README "Pass-through actions") | the upstream's own |
 
 Shared helpers live in `lib/` (`flatYaml`, `releaseScopes`, `changelog`, `output`, `gha.sh`) —
 required by the action scripts via their co-located paths, unit-tested with `node --test` (root

@@ -297,3 +297,107 @@ jobs:
           set -euo pipefail
           VALUE="$(jq -r '.OPTIONAL_TOKEN' <<< "$SECRETS_JSON")"
           [ "$VALUE" = "" ] || { echo "::error::expected empty string, got '$VALUE'"; exit 1; }
+
+  # The pass-through wrappers (lib/passthrough.js): each one loads, runs its upstream and hands the
+  # upstream outputs back. Local ./steps paths need the repo on disk, so the job's own checkout
+  # uses the upstream action directly.
+  passthrough:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: checkout
+        id: checkout
+        uses: ./steps/checkout
+        with:
+          path: second-copy
+
+      - name: assert checkout
+        env:
+          COMMIT: ${{ steps.checkout.outputs.commit }}
+          EXPECTED: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [ "$COMMIT" = "$EXPECTED" ] || { echo "::error::checkout commit '$COMMIT', expected '$EXPECTED'"; exit 1; }
+          [ -f second-copy/steps/checkout/action.yml ] || { echo "::error::checkout did not land in path"; exit 1; }
+
+      - name: setup-node
+        id: node
+        uses: ./steps/setup-node
+        with:
+          node-version: "24"
+
+      - name: setup-pnpm
+        uses: ./steps/setup-pnpm
+        with:
+          version: "10"
+
+      - name: setup-bun
+        id: bun
+        uses: ./steps/setup-bun
+
+      - name: setup-foundry
+        uses: ./steps/setup-foundry
+        with:
+          cache: "false"
+
+      - name: setup-python
+        id: python
+        uses: ./steps/setup-python
+        with:
+          python-version: "3.x"
+
+      - name: assert the toolchains
+        env:
+          NODE_VERSION: ${{ steps.node.outputs.node-version }}
+          BUN_VERSION: ${{ steps.bun.outputs.bun-version }}
+          PYTHON_VERSION: ${{ steps.python.outputs.python-version }}
+        run: |
+          set -euo pipefail
+          [[ "$NODE_VERSION" == v24.* ]] || { echo "::error::setup-node output '$NODE_VERSION'"; exit 1; }
+          [ -n "$BUN_VERSION" ] || { echo "::error::setup-bun gave no bun-version"; exit 1; }
+          [ -n "$PYTHON_VERSION" ] || { echo "::error::setup-python gave no python-version"; exit 1; }
+          node --version; pnpm --version; bun --version; forge --version; python --version
+
+      - name: make a fixture to cache and upload
+        env:
+          RUN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir -p passthrough-fixture
+          echo "$RUN" > passthrough-fixture/content.txt
+
+      # A fresh key misses; the post step saves it at the end of the job (see the job log).
+      - name: cache
+        id: cache
+        uses: ./steps/cache
+        with:
+          path: passthrough-fixture
+          key: selftest-passthrough-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: upload-artifact
+        id: upload
+        uses: ./steps/upload-artifact
+        with:
+          name: selftest-passthrough
+          path: passthrough-fixture
+          retention-days: "1"
+          overwrite: "true"
+
+      - name: download-artifact
+        id: download
+        uses: ./steps/download-artifact
+        with:
+          name: selftest-passthrough
+          path: downloaded
+
+      - name: assert cache and artifacts
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          DOWNLOAD_PATH: ${{ steps.download.outputs.download-path }}
+        run: |
+          set -euo pipefail
+          [ "$CACHE_HIT" = "false" ] || { echo "::error::expected a cache miss, got '$CACHE_HIT'"; exit 1; }
+          [ -n "$ARTIFACT_ID" ] || { echo "::error::upload-artifact gave no artifact-id"; exit 1; }
+          cmp passthrough-fixture/content.txt "$DOWNLOAD_PATH/content.txt" \
+            || { echo "::error::the downloaded artifact differs from the upload"; exit 1; }

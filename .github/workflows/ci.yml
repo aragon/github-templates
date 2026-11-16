@@ -28,6 +28,11 @@ jobs:
       - name: Unit tests
         run: node --test 'lib/*.test.js' 'steps/**/*.test.js'
 
+      # The pass-through wrappers must expose exactly what the upstream action.yml at their pin
+      # does — this is what fails a Dependabot pin bump whose upstream grew or changed an input.
+      - name: Check the pass-through actions against their pinned upstream
+        run: node lib/passthrough.js --check
+
       - name: Check workflow job guards
         uses: ./steps/workflow-guards
         with:
